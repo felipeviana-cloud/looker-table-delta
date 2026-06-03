@@ -35,7 +35,7 @@ looker.plugins.visualizations.add({
           flex-direction: column;
           font-family: "Roboto", "Open Sans", "Noto Sans", Helvetica, Arial, sans-serif;
           color: #000;
-          overflow-x: auto; /* Permite scroll horizontal no mobile */
+          overflow-x: auto; 
           overflow-y: hidden;
           -webkit-overflow-scrolling: touch;
           box-sizing: border-box;
@@ -47,12 +47,13 @@ looker.plugins.visualizations.add({
           display: flex;
           align-items: stretch;
           position: relative;
-          border-bottom: 2px solid #333; /* Linha de base principal (opcional, ajuda a guiar o olhar) */
+          /* Linha de base alterada para 1px e cinza */
+          border-bottom: 1px solid #ccc; 
         }
 
         .wf-step-col {
           flex: 1;
-          min-width: 60px; /* Garante que as colunas não sumam no mobile */
+          min-width: 60px; 
           display: flex;
           justify-content: center;
           position: relative;
@@ -61,13 +62,12 @@ looker.plugins.visualizations.add({
 
         .wf-bar {
           position: absolute;
-          width: 80%; /* Deixa um respiro entre as barras */
+          width: 80%; 
           border-radius: 2px;
           transition: all 0.3s ease;
           box-sizing: border-box;
         }
 
-        /* O Tooltip padrão do HTML (title) já vai mostrar o valor, mas adicionamos cursor de pointer */
         .wf-bar:hover {
           filter: brightness(0.9);
           cursor: pointer; 
@@ -83,7 +83,6 @@ looker.plugins.visualizations.add({
           white-space: nowrap;
         }
 
-        /* Labels: Positivo (Acima), Negativo (Abaixo) */
         .wf-label.up {
           bottom: 100%;
           margin-bottom: 6px;
@@ -95,7 +94,7 @@ looker.plugins.visualizations.add({
 
         .wf-connector {
           position: absolute;
-          width: 125%; /* Conecta com a próxima barra */
+          width: 125%; 
           height: 1px;
           border-top: 1px dashed #ccc;
           z-index: 0;
@@ -116,7 +115,6 @@ looker.plugins.visualizations.add({
           font-size: 11px;
           font-weight: 500;
           color: #4c535b;
-          /* Quebra a linha ou esconde o texto para caber no mobile */
           display: -webkit-box;
           -webkit-line-clamp: 3;
           -webkit-box-orient: vertical;
@@ -140,11 +138,8 @@ looker.plugins.visualizations.add({
     var measures = queryResponse.fields.measure_like || [];
     var dimensions = queryResponse.fields.dimension_like || [];
 
-    // --- 1. PREPARANDO OS DADOS ---
     var stepsData = [];
     
-    // Lógica inteligente: se tiver 1 dimensão e 1 métrica mas várias linhas, trata as linhas como passos.
-    // Senão (o mais comum), trata as múltiplas métricas da primeira linha como passos.
     if (measures.length === 1 && data.length > 1 && dimensions.length > 0) {
       data.forEach(function(row) {
         stepsData.push({
@@ -166,7 +161,6 @@ looker.plugins.visualizations.add({
       return;
     }
 
-    // --- 2. CÁLCULO DA CASCATA (WATERFALL MATH) ---
     var steps = [];
     var currentTotal = 0;
 
@@ -181,7 +175,6 @@ looker.plugins.visualizations.add({
       currentTotal += d.val;
     });
 
-    // Adiciona a coluna final de Total
     steps.push({
       name: "Total",
       raw_val: currentTotal,
@@ -190,12 +183,12 @@ looker.plugins.visualizations.add({
       isTotal: true
     });
 
-    // --- 3. FORMATADOR DE VALORES (K, M, B) ---
+    // Função ajustada para 3 casas decimais cravadas
     function formatAbbreviated(num) {
       if (isNaN(num) || !isFinite(num)) return "-";
       var absNum = Math.abs(num);
       
-      var options = { maximumFractionDigits: 1 };
+      var options = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
       
       if (absNum >= 1e9) {
         return (num / 1e9).toLocaleString('pt-BR', options) + ' B';
@@ -204,16 +197,14 @@ looker.plugins.visualizations.add({
       } else if (absNum >= 1e3) {
         return (num / 1e3).toLocaleString('pt-BR', options) + ' K';
       } else {
-        return num.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+        return num.toLocaleString('pt-BR', options);
       }
     }
 
     function formatFull(num) {
-      return num.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+      return num.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
     }
 
-    // --- 4. ESCALA Y E LIMITES DO GRÁFICO ---
-    // Encontrar o ponto mais alto e mais baixo para desenhar a proporção em %
     var min_y = 0;
     var max_y = 0;
     steps.forEach(function(s) {
@@ -224,35 +215,28 @@ looker.plugins.visualizations.add({
     var range = max_y - min_y;
     if (range === 0) range = 1;
 
-    // Adiciona uma "gordura" (padding) de 15% em cima e embaixo para caberem os labels
+    // Removemos a margem inferior. O gráfico ocupará o máximo de espaço até a linha base.
+    // Mantemos apenas 15% a mais no TOPO para os rótulos de valores não cortarem na borda superior.
     max_y += range * 0.15;
-    min_y -= range * 0.15;
     range = max_y - min_y;
 
-    // Cores configuradas pelo usuário (ou padrão)
     var posColor = config.color_positive || "#2196F3";
     var negColor = config.color_negative || "#F44336";
     var totColor = config.color_total || "#9E9E9E";
 
-    // --- 5. RENDERIZAÇÃO DO HTML ---
     var chartHtml = '<div class="wf-chart-area">';
     var axisHtml = '<div class="wf-x-axis">';
 
     steps.forEach(function(s, index) {
       var isPositive = s.end >= s.start;
       
-      // Cor da barra
       var bgColor = s.isTotal ? totColor : (isPositive ? posColor : negColor);
       
-      // Lógica de posicionamento CSS (% em relação ao topo e altura baseada na diferença)
       var topPercent = ((max_y - Math.max(s.start, s.end)) / range) * 100;
       var heightPercent = (Math.abs(s.end - s.start) / range) * 100;
       
-      // Posição da Label (Cima se a barra sobe, Baixo se a barra desce)
-      // Como o Total sempre sai do zero, ele será tratado como positivo se for > 0
       var labelPosition = isPositive ? 'up' : 'down';
       
-      // Conector pontilhado para a próxima barra (não renderiza no último passo)
       var connectorHtml = '';
       if (index < steps.length - 1) {
         var connectorPos = isPositive ? 'top: 0;' : 'bottom: 0;';
@@ -260,7 +244,6 @@ looker.plugins.visualizations.add({
       }
 
       var formattedAbbr = formatAbbreviated(s.raw_val);
-      // Sinal de + para números positivos (exceto o total final que é absoluto)
       var prefix = (!s.isTotal && s.raw_val > 0) ? "+" : "";
 
       chartHtml += `
