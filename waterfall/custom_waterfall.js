@@ -29,6 +29,19 @@ looker.plugins.visualizations.add({
       default: "#9E9E9E",
       display: "color",
       order: 4
+    },
+    number_format: {
+      type: "string",
+      label: "Formatação de Números",
+      display: "select",
+      values: [
+        {"Automático (K, M, B)": "auto"},
+        {"Milhões (M)": "millions"},
+        {"Bilhões (B)": "billions"},
+        {"Número Cheio": "full"}
+      ],
+      default: "auto",
+      order: 5
     }
   },
 
@@ -190,24 +203,41 @@ looker.plugins.visualizations.add({
       isTotal: true
     });
 
-    // Função ajustada para 3 casas decimais cravadas
-    function formatAbbreviated(num) {
+    // Puxa a escolha de formatação do usuário
+    var formatStyle = config.number_format || "auto";
+
+    // Função de formatação ajustada para interpretar a escolha do usuário
+    function formatValue(num, style) {
       if (isNaN(num) || !isFinite(num)) return "-";
       var absNum = Math.abs(num);
-      
       var options = { minimumFractionDigits: 3, maximumFractionDigits: 3 };
       
-      if (absNum >= 1e9) {
-        return (num / 1e9).toLocaleString('pt-BR', options) + ' B';
-      } else if (absNum >= 1e6) {
-        return (num / 1e6).toLocaleString('pt-BR', options) + ' M';
-      } else if (absNum >= 1e3) {
-        return (num / 1e3).toLocaleString('pt-BR', options) + ' K';
-      } else {
-        return num.toLocaleString('pt-BR', options);
+      var formattedNum = num;
+      var suffix = "";
+
+      if (style === "millions") {
+        formattedNum = num / 1e6;
+        suffix = " M";
+      } else if (style === "billions") {
+        formattedNum = num / 1e9;
+        suffix = " B";
+      } else if (style === "auto") {
+        if (absNum >= 1e9) {
+          formattedNum = num / 1e9;
+          suffix = " B";
+        } else if (absNum >= 1e6) {
+          formattedNum = num / 1e6;
+          suffix = " M";
+        } else if (absNum >= 1e3) {
+          formattedNum = num / 1e3;
+          suffix = " K";
+        }
       }
+
+      return formattedNum.toLocaleString('pt-BR', options) + suffix;
     }
 
+    // Usado exclusivamente para o Tooltip (exibe o número completo ao passar o mouse)
     function formatFull(num) {
       return num.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
     }
@@ -259,7 +289,8 @@ looker.plugins.visualizations.add({
         connectorHtml = `<div class="wf-connector" style="${connectorPos} right: -90%;"></div>`;
       }
 
-      var formattedAbbr = formatAbbreviated(s.raw_val);
+      // Aplica a nova formatação dinâmica
+      var formattedLabel = formatValue(s.raw_val, formatStyle);
       var prefix = (!s.isTotal && index !== 0 && s.raw_val > 0) ? "+" : ""; // Evita "+" na primeira barra
 
       chartHtml += `
@@ -269,7 +300,7 @@ looker.plugins.visualizations.add({
                style="top: ${topPercent}%; height: ${heightPercent}%; background-color: ${bgColor};">
             ${connectorHtml}
             <div class="wf-label ${labelPosition}">
-               ${prefix}${formattedAbbr}
+               ${prefix}${formattedLabel}
             </div>
           </div>
         </div>
