@@ -15,20 +15,6 @@ looker.plugins.visualizations.add({
       default: "#e5252b",
       display: "color",
       order: 2
-    },
-    number_format: {
-      type: "string",
-      label: "Formatação de Números",
-      display: "select",
-      values: [
-        {"Looker Nativo (Rendered)": "looker"},
-        {"Automático (K, M, B)": "auto"},
-        {"Milhões (M)": "millions"},
-        {"Bilhões (B)": "billions"},
-        {"Número Cheio": "full"}
-      ],
-      default: "looker",
-      order: 3
     }
   },
 
@@ -145,7 +131,6 @@ looker.plugins.visualizations.add({
 
     var posColor = config.color_positive || "#24b25f";
     var negColor = config.color_negative || "#e5252b";
-    var formatStyle = config.number_format || "looker";
     
     function getColor(val) {
       if (val > 0) return posColor;
@@ -153,38 +138,10 @@ looker.plugins.visualizations.add({
       return "#666666";
     }
 
-    function formatNumber(num, isPercent, style) {
+    function formatNumber(num, isPercent) {
       if (isNaN(num) || !isFinite(num)) return "-";
-      
-      // Lógica de Percentual
-      if (isPercent) return (num * 100).toFixed(2).replace('.', ',') + "%";
-
-      var absNum = Math.abs(num);
-      var formattedNum = num;
-      var suffix = "";
-
-      // Aplica as regras de acordo com o Edit do Looker
-      if (style === "millions") {
-        formattedNum = num / 1000000;
-        suffix = " M";
-      } else if (style === "billions") {
-        formattedNum = num / 1000000000;
-        suffix = " B";
-      } else if (style === "auto" || style === "looker") {
-        if (absNum >= 1000000000) {
-          formattedNum = num / 1000000000;
-          suffix = " B";
-        } else if (absNum >= 1000000) {
-          formattedNum = num / 1000000;
-          suffix = " M";
-        } else if (absNum >= 1000) {
-          formattedNum = num / 1000;
-          suffix = " K";
-        }
-      }
-
-      // Converte para padrão Brasileiro
-      return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(formattedNum) + suffix;
+      if (isPercent) return (num * 100).toFixed(2) + "%";
+      return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(num);
     }
 
     var dimValue1 = cleanDimValue(row1[dimName].rendered || row1[dimName].value);
@@ -203,25 +160,18 @@ looker.plugins.visualizations.add({
     // Linha 1
     html += `<tr><td>${dimValue1}</td>`;
     measures.forEach(function(m) {
-      var val = row1[m.name].value || 0;
-      var rendered = row1[m.name].rendered;
-      // Usa o rendered padrão do Looker se selecionado, senão força nossa formatação
-      var displayVal = (formatStyle === "looker" && rendered) ? rendered : formatNumber(val, false, formatStyle);
-      html += `<td>${displayVal}</td>`;
+      html += `<td>${row1[m.name].rendered || row1[m.name].value}</td>`;
     });
     html += '</tr>';
 
     // Linha 2
     html += `<tr><td>${dimValue2}</td>`;
     measures.forEach(function(m) {
-      var val = row2[m.name].value || 0;
-      var rendered = row2[m.name].rendered;
-      var displayVal = (formatStyle === "looker" && rendered) ? rendered : formatNumber(val, false, formatStyle);
-      html += `<td>${displayVal}</td>`;
+      html += `<td>${row2[m.name].rendered || row2[m.name].value}</td>`;
     });
     html += '</tr>';
 
-    // Linha 3: Delta Valor (Agora chamado de VAR. R$)
+    // Linha 3: Delta Valor
     html += `<tr class="delta-row"><td>VAR. R$</td>`;
     measures.forEach(function(m) {
       var val1 = row1[m.name].value || 0;
@@ -229,11 +179,11 @@ looker.plugins.visualizations.add({
       var deltaVal = val2 - val1;
       
       var prefix = deltaVal > 0 ? "+" : "";
-      html += `<td style="color: ${getColor(deltaVal)}">${prefix}${formatNumber(deltaVal, false, formatStyle)}</td>`;
+      html += `<td style="color: ${getColor(deltaVal)}">${prefix}${formatNumber(deltaVal, false)}</td>`;
     });
     html += '</tr>';
 
-    // Linha 4: Delta Percentual (Agora chamado de VAR. %)
+    // Linha 4: Delta Percentual
     html += `<tr class="delta-row"><td>VAR. %</td>`;
     measures.forEach(function(m) {
       var val1 = row1[m.name].value || 0;
@@ -245,7 +195,7 @@ looker.plugins.visualizations.add({
       }
       
       var prefix = deltaPct > 0 ? "+" : "";
-      html += `<td style="color: ${getColor(deltaPct)}">${prefix}${formatNumber(deltaPct, true, formatStyle)}</td>`;
+      html += `<td style="color: ${getColor(deltaPct)}">${prefix}${formatNumber(deltaPct, true)}</td>`;
     });
     html += '</tr>';
 
