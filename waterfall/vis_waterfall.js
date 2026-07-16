@@ -49,6 +49,7 @@ looker.plugins.visualizations.add({
     element.innerHTML = `
       <style>
         .wf-container {
+          /* SOLUÇÃO DO TAMANHO: Position absolute com top/bottom 0 força a ocupar 100% do tile */
           position: absolute; 
           top: 0;
           bottom: 0;
@@ -71,8 +72,7 @@ looker.plugins.visualizations.add({
 
         .wf-bars-container {
           position: absolute;
-          /* AJUSTE: Retornado para 65px para o gráfico ocupar mais espaço vertical */
-          top: 65px; 
+          top: 60px; 
           bottom: 0;
           left: 0;
           right: 0;
@@ -156,9 +156,10 @@ looker.plugins.visualizations.add({
         /* --- Estilos da Seta Superior --- */
         .wf-summary-arrow {
           position: absolute;
-          top: 35px; 
+          /* AJUSTE AQUI PARA MOVER A SETA INTEIRA: 
+             Se quiser afastar a linha do topo da tela, aumente esse valor (ex: 30px) */
+          top: 20px;
           height: 12px;
-          /* A linha horizontal da seta é o border-top */
           border-top: 1.5px solid #333;
           border-left: 1.5px solid #333;
           z-index: 10;
@@ -185,9 +186,11 @@ looker.plugins.visualizations.add({
         
         .wf-summary-label {
           position: absolute;
-          /* AJUSTE: Top negativo para subir o texto para ACIMA da linha da seta.
-             Como a linha está no topo do container, -20px posiciona o texto acima dela. */
-          top: -20px; 
+          /* AJUSTE AQUI PARA A DISTÂNCIA DO NÚMERO ATÉ A LINHA DA SETA:
+             Estava -22px. Mudei para -30px para subir o texto.
+             Se quiser subir MAIS o texto, coloque um número mais negativo (ex: -35px ou -40px). 
+             Se quiser descer o texto, coloque um número menos negativo (ex: -20px). */
+          top: -30px; 
           width: 100%;
           text-align: center;
           font-weight: bold;
