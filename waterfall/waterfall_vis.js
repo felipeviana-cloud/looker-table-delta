@@ -71,8 +71,8 @@ looker.plugins.visualizations.add({
 
         .wf-bars-container {
           position: absolute;
-          /* AJUSTE AQUI: Aumentado para 80px para dar respiro entre os labels das barras e a ponta da seta */
-          top: 80px; 
+          /* AJUSTE: Retornado para 65px para o gráfico ocupar mais espaço vertical */
+          top: 65px; 
           bottom: 0;
           left: 0;
           right: 0;
@@ -156,9 +156,9 @@ looker.plugins.visualizations.add({
         /* --- Estilos da Seta Superior --- */
         .wf-summary-arrow {
           position: absolute;
-          /* AJUSTE AQUI: Posição vertical da linha da seta */
           top: 35px; 
           height: 12px;
+          /* A linha horizontal da seta é o border-top */
           border-top: 1.5px solid #333;
           border-left: 1.5px solid #333;
           z-index: 10;
@@ -185,8 +185,9 @@ looker.plugins.visualizations.add({
         
         .wf-summary-label {
           position: absolute;
-          /* AJUSTE AQUI: bottom 4px ancora o texto a 4px de distância da linha da seta */
-          bottom: 4px; 
+          /* AJUSTE: Top negativo para subir o texto para ACIMA da linha da seta.
+             Como a linha está no topo do container, -20px posiciona o texto acima dela. */
+          top: -20px; 
           width: 100%;
           text-align: center;
           font-weight: bold;
