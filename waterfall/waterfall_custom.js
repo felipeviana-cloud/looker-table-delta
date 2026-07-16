@@ -5,7 +5,7 @@ looker.plugins.visualizations.add({
     color_first: {
       type: "string",
       label: "Cor do Início (Primeira Barra)",
-      default: "#3F51B5", // Azul escuro padrão para diferenciar
+      default: "#3F51B5",
       display: "color",
       order: 1
     },
@@ -49,31 +49,41 @@ looker.plugins.visualizations.add({
     element.innerHTML = `
       <style>
         .wf-container {
-          width: 100%;
-          height: 100%;
+          /* SOLUÇÃO DO TAMANHO: Position absolute com top/bottom 0 força a ocupar 100% do tile */
+          position: absolute; 
+          top: 0;
+          bottom: 0;
+          left: 0;
+          right: 0;
           display: flex;
           flex-direction: column;
           font-family: "Roboto", "Open Sans", "Noto Sans", Helvetica, Arial, sans-serif;
           color: #000;
-          overflow-x: auto; 
-          overflow-y: hidden;
-          -webkit-overflow-scrolling: touch;
+          overflow: hidden; 
           box-sizing: border-box;
-          padding: 20px 10px 10px 10px;
+          padding: 10px 10px 0px 10px;
         }
 
         .wf-chart-area {
           flex-grow: 1;
+          position: relative;
+          width: 100%;
+        }
+
+        .wf-bars-container {
+          position: absolute;
+          top: 60px; 
+          bottom: 0;
+          left: 0;
+          right: 0;
           display: flex;
           align-items: stretch;
-          position: relative;
-          /* Linha de base alterada para 1px e cinza */
           border-bottom: 1px solid #ccc; 
         }
 
         .wf-step-col {
           flex: 1;
-          min-width: 60px; 
+          min-width: 0; 
           display: flex;
           justify-content: center;
           position: relative;
@@ -99,7 +109,7 @@ looker.plugins.visualizations.add({
           transform: translateX(-50%);
           font-weight: bold;
           font-size: 12px;
-          color: #000;
+          color: #333;
           white-space: nowrap;
         }
 
@@ -123,23 +133,69 @@ looker.plugins.visualizations.add({
 
         .wf-x-axis {
           display: flex;
-          margin-top: 10px;
-          min-height: 40px;
+          margin-top: 5px;
+          margin-bottom: 5px;
+          min-height: 35px;
         }
 
         .wf-x-label {
           flex: 1;
-          min-width: 60px;
+          min-width: 0;
           margin: 0 4px;
           text-align: center;
           font-size: 11px;
           font-weight: 500;
           color: #4c535b;
           display: -webkit-box;
-          -webkit-line-clamp: 3;
+          -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+
+        /* --- Estilos da Seta Superior --- */
+        .wf-summary-arrow {
+          position: absolute;
+          /* AJUSTE AQUI PARA MOVER A SETA INTEIRA: 
+             Se quiser afastar a linha do topo da tela, aumente esse valor (ex: 30px) */
+          top: 25px; 
+          height: 12px;
+          border-top: 1.5px solid #333;
+          border-left: 1.5px solid #333;
+          z-index: 10;
+        }
+        
+        .wf-summary-arrow .right-drop {
+          position: absolute;
+          right: 0;
+          top: 0;
+          height: 100%;
+          border-right: 1.5px solid #333;
+        }
+        
+        /* Ponta da Seta (Triângulo) */
+        .wf-summary-arrow .right-drop::after {
+          content: '';
+          position: absolute;
+          bottom: -6px;
+          right: -4.5px;
+          border-left: 4px solid transparent;
+          border-right: 4px solid transparent;
+          border-top: 6px solid #333;
+        }
+        
+        .wf-summary-label {
+          position: absolute;
+          /* AJUSTE AQUI PARA A DISTÂNCIA DO NÚMERO ATÉ A LINHA DA SETA:
+             Estava -22px. Mudei para -30px para subir o texto.
+             Se quiser subir MAIS o texto, coloque um número mais negativo (ex: -35px ou -40px). 
+             Se quiser descer o texto, coloque um número menos negativo (ex: -20px). */
+          top: -30px; 
+          width: 100%;
+          text-align: center;
+          font-weight: bold;
+          font-size: 14px;
+          color: #111;
         }
       </style>
       <div class="wf-container" id="wf-vis-container"></div>
@@ -157,7 +213,6 @@ looker.plugins.visualizations.add({
 
     var measures = queryResponse.fields.measure_like || [];
     var dimensions = queryResponse.fields.dimension_like || [];
-
     var stepsData = [];
     
     if (measures.length === 1 && data.length > 1 && dimensions.length > 0) {
@@ -203,10 +258,8 @@ looker.plugins.visualizations.add({
       isTotal: true
     });
 
-    // Puxa a escolha de formatação do usuário
     var formatStyle = config.number_format || "auto";
 
-    // Função de formatação ajustada para interpretar a escolha do usuário
     function formatValue(num, style) {
       if (isNaN(num) || !isFinite(num)) return "-";
       var absNum = Math.abs(num);
@@ -237,7 +290,6 @@ looker.plugins.visualizations.add({
       return formattedNum.toLocaleString('pt-BR', options) + suffix;
     }
 
-    // Usado exclusivamente para o Tooltip (exibe o número completo ao passar o mouse)
     function formatFull(num) {
       return num.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
     }
@@ -252,10 +304,16 @@ looker.plugins.visualizations.add({
     var range = max_y - min_y;
     if (range === 0) range = 1;
 
-    // Removemos a margem inferior. O gráfico ocupará o máximo de espaço até a linha base.
-    // Mantemos apenas 15% a mais no TOPO para os rótulos de valores não cortarem na borda superior.
-    max_y += range * 0.15;
-    range = max_y - min_y;
+    // --- CÁLCULO DA VARIAÇÃO GERAL (TOPO) ---
+    var firstVal = steps[0].raw_val;
+    var lastVal = steps[steps.length - 1].raw_val;
+    var varAbs = lastVal - firstVal;
+    var varPct = firstVal !== 0 ? (varAbs / firstVal) : 0;
+    
+    var prefixAbs = varAbs > 0 ? "+" : "";
+    var prefixPct = varPct > 0 ? "+" : "";
+    var varAbsStr = prefixAbs + formatValue(varAbs, formatStyle);
+    var varPctStr = prefixPct + (varPct * 100).toFixed(0) + "%";
 
     var firstColor = config.color_first || "#3F51B5";
     var posColor = config.color_positive || "#2196F3";
@@ -263,12 +321,22 @@ looker.plugins.visualizations.add({
     var totColor = config.color_total || "#9E9E9E";
 
     var chartHtml = '<div class="wf-chart-area">';
+    
+    // HTML da Seta Superior
+    chartHtml += `
+      <div class="wf-summary-arrow" 
+           style="left: calc(50% / ${steps.length}); width: calc(100% - (100% / ${steps.length}));">
+        <div class="right-drop"></div>
+        <div class="wf-summary-label">${varAbsStr} &nbsp; ${varPctStr}</div>
+      </div>
+    `;
+
+    chartHtml += '<div class="wf-bars-container">';
     var axisHtml = '<div class="wf-x-axis">';
 
     steps.forEach(function(s, index) {
       var isPositive = s.end >= s.start;
       
-      // Lógica de cores atualizada: Total, Primeira Barra ou Meio (Positivo/Negativo)
       var bgColor;
       if (s.isTotal) {
         bgColor = totColor;
@@ -289,9 +357,8 @@ looker.plugins.visualizations.add({
         connectorHtml = `<div class="wf-connector" style="${connectorPos} right: -90%;"></div>`;
       }
 
-      // Aplica a nova formatação dinâmica
       var formattedLabel = formatValue(s.raw_val, formatStyle);
-      var prefix = (!s.isTotal && index !== 0 && s.raw_val > 0) ? "+" : ""; // Evita "+" na primeira barra
+      var prefix = (!s.isTotal && index !== 0 && s.raw_val > 0) ? "+" : ""; 
 
       chartHtml += `
         <div class="wf-step-col">
@@ -309,7 +376,7 @@ looker.plugins.visualizations.add({
       axisHtml += `<div class="wf-x-label" title="${s.name}">${s.name}</div>`;
     });
 
-    chartHtml += '</div>';
+    chartHtml += '</div></div>';
     axisHtml += '</div>';
 
     document.getElementById('wf-vis-container').innerHTML = chartHtml + axisHtml;
