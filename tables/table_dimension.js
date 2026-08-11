@@ -24,7 +24,14 @@ looker.plugins.visualizations.add({
       placeholder: "Ex: view.campo1, view.campo2",
       default: "",
       section: "Dados",
-      order: 3
+      order: 1
+    },
+    reverse_data: {
+      type: "boolean",
+      label: "Inverter a ordem dos dados (Reverse)",
+      default: false,
+      section: "Dados",
+      order: 2
     },
     filter_field: {
       type: "string",
@@ -32,7 +39,7 @@ looker.plugins.visualizations.add({
       placeholder: "Ex: view.mob_payback ou calculation_1",
       default: "",
       section: "Filtros",
-      order: 4
+      order: 1
     }
   },
 
@@ -61,33 +68,36 @@ looker.plugins.visualizations.add({
       return;
     }
 
-    // --- NOVA LÓGICA DE FILTRO ---
-    // Filtra os dados (que virarão colunas) para remover os que têm o campo especificado como nulo
+    // --- LÓGICA DE FILTRO DE NULOS ---
     let dadosParaExibir = data;
     
     if (config.filter_field && config.filter_field.trim() !== "") {
       const campoFiltro = config.filter_field.trim();
       
-      // Verifica se o campo digitado existe na query
       const campoExiste = queryResponse.fields.measure_like.find(m => m.name === campoFiltro) || 
                           queryResponse.fields.table_calculations.find(tc => tc.name === campoFiltro);
                           
       if (!campoExiste) {
          console.warn(`O campo ${campoFiltro} não foi encontrado na query. O filtro foi ignorado.`);
       } else {
-        // Aplica o filtro
         dadosParaExibir = data.filter(row => {
           let cell = row[campoFiltro];
-          // Mantém a coluna apenas se o valor existir e NÃO for nulo
           return cell !== undefined && cell.value !== null;
         });
       }
     }
 
+    // --- NOVA LÓGICA DE REVERSE ---
+    // Se a opção estiver marcada como "true", inverte a ordem da array de dados
+    if (config.reverse_data) {
+      // Usamos .slice() para criar uma cópia da array antes de inverter, evitando modificar os dados originais
+      dadosParaExibir = dadosParaExibir.slice().reverse();
+    }
+
     // Inicia a construção da tabela HTML
     let html = `<table style="border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: ${config.font_size}px;">`;
 
-    // Para cada dimensão escolhida, cria uma linha horizontal (<tr>)
+    // Para cada dimensão, cria uma linha horizontal
     dimensions.forEach(dim => {
       html += `<tr>`;
       
@@ -96,7 +106,7 @@ looker.plugins.visualizations.add({
                  ${dim.label_short || dim.label}
                </th>`;
       
-      // Percorre os DADOS FILTRADOS
+      // Percorre os DADOS (agora filtrados e possivelmente invertidos)
       dadosParaExibir.forEach(row => {
         let cellData = row[dim.name];
         let cellValue = (cellData && (cellData.html || cellData.rendered || cellData.value)) || "";
