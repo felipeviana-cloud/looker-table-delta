@@ -2,7 +2,7 @@ looker.plugins.visualizations.add({
   id: "tabela_dimensoes_horizontais",
   label: "Tabela Horizontal",
   
-  // 1. Definição das Opções (Menu de Engrenagem no Looker)
+  // 1. Definição das Opções
   options: {
     font_size: {
       type: "number",
@@ -21,14 +21,21 @@ looker.plugins.visualizations.add({
     chosen_dimensions: {
       type: "string",
       label: "Dimensões para exibir (separadas por vírgula)",
-      placeholder: "Deixe em branco para todas ou digite: view.campo1, view.campo2",
+      placeholder: "Ex: view.campo1, view.campo2",
       default: "",
       section: "Dados",
       order: 3
+    },
+    filter_field: {
+      type: "string",
+      label: "Ocultar coluna se este campo for Nulo",
+      placeholder: "Ex: view.mob_payback ou calculation_1",
+      default: "",
+      section: "Filtros",
+      order: 4
     }
   },
 
-  // 2. Configuração inicial do elemento HTML
   create: function(element, config) {
     this.container = element.appendChild(document.createElement("div"));
     this.container.style.width = "100%";
@@ -36,14 +43,11 @@ looker.plugins.visualizations.add({
     this.container.style.overflow = "auto";
   },
 
-  // 3. Renderização dos dados sempre que a query rodar ou opções mudarem
   updateAsync: function(data, element, config, queryResponse, details, done) {
     this.clearErrors();
 
-    // Pega todas as dimensões retornadas pela query
+    // Filtra as dimensões escolhidas
     let dimensions = queryResponse.fields.dimension_like;
-
-    // Filtra as dimensões caso o usuário tenha especificado quais quer ver nas opções
     if (config.chosen_dimensions && config.chosen_dimensions.trim() !== "") {
       const chosen = config.chosen_dimensions.split(',').map(s => s.trim());
       dimensions = dimensions.filter(d => chosen.includes(d.name));
@@ -52,9 +56,32 @@ looker.plugins.visualizations.add({
     if (dimensions.length === 0) {
       this.addError({
         title: "Nenhuma dimensão encontrada",
-        message: "Adicione dimensões à query ou verifique os nomes digitados nas opções."
+        message: "Verifique os nomes digitados nas opções."
       });
       return;
+    }
+
+    // --- NOVA LÓGICA DE FILTRO ---
+    // Filtra os dados (que virarão colunas) para remover os que têm o campo especificado como nulo
+    let dadosParaExibir = data;
+    
+    if (config.filter_field && config.filter_field.trim() !== "") {
+      const campoFiltro = config.filter_field.trim();
+      
+      // Verifica se o campo digitado existe na query
+      const campoExiste = queryResponse.fields.measure_like.find(m => m.name === campoFiltro) || 
+                          queryResponse.fields.table_calculations.find(tc => tc.name === campoFiltro);
+                          
+      if (!campoExiste) {
+         console.warn(`O campo ${campoFiltro} não foi encontrado na query. O filtro foi ignorado.`);
+      } else {
+        // Aplica o filtro
+        dadosParaExibir = data.filter(row => {
+          let cell = row[campoFiltro];
+          // Mantém a coluna apenas se o valor existir e NÃO for nulo
+          return cell !== undefined && cell.value !== null;
+        });
+      }
     }
 
     // Inicia a construção da tabela HTML
@@ -64,16 +91,15 @@ looker.plugins.visualizations.add({
     dimensions.forEach(dim => {
       html += `<tr>`;
       
-      // Cabeçalho da linha (Nome da Dimensão)
+      // Cabeçalho da linha
       html += `<th style="text-align: left; padding: ${config.row_padding}px; border: 1px solid #ddd; background-color: #f4f6f7; white-space: nowrap;">
                  ${dim.label_short || dim.label}
                </th>`;
       
-      // Percorre os dados da query transformando o que seriam linhas em colunas horizontais
-      data.forEach(row => {
-        // Pega o HTML customizado do Looker ou faz fallback para o valor puro
+      // Percorre os DADOS FILTRADOS
+      dadosParaExibir.forEach(row => {
         let cellData = row[dim.name];
-        let cellValue = cellData.html || cellData.rendered || cellData.value || "";
+        let cellValue = (cellData && (cellData.html || cellData.rendered || cellData.value)) || "";
         
         html += `<td style="padding: ${config.row_padding}px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">
                    ${cellValue}
@@ -84,11 +110,7 @@ looker.plugins.visualizations.add({
     });
 
     html += `</table>`;
-
-    // Insere a tabela montada na tela
     this.container.innerHTML = html;
-
-    // Avisa o Looker que a renderização terminou
     done();
   }
 });
