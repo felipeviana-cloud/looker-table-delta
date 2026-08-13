@@ -1,27 +1,18 @@
 looker.plugins.visualizations.add({
-  id: "heatmap_avancado_seguro",
-  label: "Heatmap Avançado (Anti-Undefined)",
+  id: "heatmap_definitivo",
+  label: "Heatmap (Blindado)",
   options: {
     // --- SEÇÃO 1: APLICAÇÃO ---
     applyTo: {
-      type: "string",
-      label: "Apply to",
-      display: "select",
-      values: [
-        {"Tabela Inteira (All)": "all"},
-        {"Por Coluna (Column)": "col"},
-        {"Por Linha (Row)": "row"}
-      ],
-      default: "col",
-      section: "1. Regras"
+      type: "string", label: "Apply to", display: "select",
+      values: [ {"Tabela Inteira (All)": "all"}, {"Por Coluna (Column)": "col"}, {"Por Linha (Row)": "row"} ],
+      default: "col", section: "1. Regras"
     },
-    
     // --- SEÇÃO 2: CORES ---
     colorStart: { type: "string", label: "Cor Inicial (Start)", display: "color", default: "#f44336", section: "2. Cores" },
     colorMid: { type: "string", label: "Cor Central (Mid)", display: "color", default: "#ffeb3b", section: "2. Cores" },
     colorEnd: { type: "string", label: "Cor Final (End)", display: "color", default: "#4caf50", section: "2. Cores" },
     reverseColors: { type: "boolean", label: "Reverse colors", default: false, section: "2. Cores" },
-
     // --- SEÇÃO 3: RANGE START / END ---
     startType: {
       type: "string", label: "Start Mode", display: "select",
@@ -35,7 +26,6 @@ looker.plugins.visualizations.add({
       default: "max", section: "3. Limites (Start/End)"
     },
     endValue: { type: "number", label: "End Value (se Number ou Percentile)", default: 100, section: "3. Limites (Start/End)" },
-
     // --- SEÇÃO 4: CENTER ---
     centerType: {
       type: "string", label: "Center Mode", display: "select",
@@ -59,79 +49,101 @@ looker.plugins.visualizations.add({
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
     this.clearErrors();
+    const container = element.querySelector("#table-container");
 
     if (!data || data.length === 0) {
-      this.addError({title: "Sem dados", message: "A query não retornou dados."});
-      return;
+      container.innerHTML = "<div>Nenhum dado retornado.</div>";
+      done(); return;
     }
 
-    const container = element.querySelector("#table-container");
-    const dimensions = queryResponse.fields.dimensions || [];
-    const measures = queryResponse.fields.measures || [];
-    const pivots = queryResponse.fields.pivots || [];
+    // 1. CAPTURAR DIMENSÕES (usando dimension_like para pegar cálculos de dimensão também)
+    const dimensions = queryResponse.fields.dimension_like || queryResponse.fields.dimensions || [];
     
-    if (dimensions.length === 0 || measures.length === 0) {
-      this.addError({title: "Configuração Incompleta", message: "Adicione ao menos uma dimensão e uma métrica."});
-      return;
+    // 2. CAPTURAR MEDIDAS (usando measure_like para garantir que Table Calculations entrem aqui)
+    let measures = queryResponse.fields.measure_like || queryResponse.fields.measures || [];
+    if (measures.length === 0 && queryResponse.fields.table_calculations) {
+      measures = queryResponse.fields.table_calculations;
     }
 
-    // Identificar a métrica principal de forma segura
-    const primaryMeasure = measures[0];
+    // 3. MAPEAMENTO DINÂMICO DE COLUNAS (Lê a linha 0 para descobrir a estrutura real)
+    let columns = [];
     
-    // Função auxiliar para encontrar a chave correta da medida no objeto de dados da linha
-    const getMeasureContainer = (row) => {
-      if (row[primaryMeasure.name]) return row[primaryMeasure.name];
-      // Fallback: procura qualquer chave que contenha o nome da medida ou seja um objeto com os pivots
-      let foundKey = Object.keys(row).find(k => k.includes(primaryMeasure.name.split('.').pop()) || (typeof row[k] === 'object' && row[k] !== null && !dimensions.some(d => d.name === k)));
-      return foundKey ? row[foundKey] : null;
-    };
+    measures.forEach(m => {
+      let mName = m.name;
+      let mLabel = m.label_short || m.label || mName || "Valor";
+      let isPivotedInData = false;
+      let pivotKeysInData = [];
 
-    const pivotKeys = pivots.length > 0 ? pivots.map(p => p.key) : ['no_pivot'];
+      // Inspeciona os dados para ver se a métrica possui chaves de pivot internas
+      for (let i = 0; i < data.length; i++) {
+        if (data[i][mName]) {
+          let cellData = data[i][mName];
+          if (typeof cellData === 'object' && cellData !== null && cellData.value === undefined) {
+            isPivotedInData = true;
+            pivotKeysInData = Object.keys(cellData).filter(k => !k.includes('$$$')); // Remove totais de linha do Looker
+          }
+          break;
+        }
+      }
+
+      if (isPivotedInData) {
+        pivotKeysInData.forEach(pk => {
+          columns.push({
+            id: mName + '|' + pk,
+            measure: mName,
+            pivot: pk,
+            label: measures.length > 1 ? (mLabel + ' - ' + pk) : pk // Se for só 1 métrica, usa só o nome do pivot
+          });
+        });
+      } else {
+        columns.push({ id: mName, measure: mName, pivot: null, label: mLabel });
+      }
+    });
+
+    // Fallback Extremo: Se os metadados falharem totalmente, lê as chaves direto do JSON de dados
+    if (columns.length === 0) {
+      let dimNames = dimensions.map(d => d.name);
+      let rawKeys = Object.keys(data[0]).filter(k => !dimNames.includes(k));
+      rawKeys.forEach(k => columns.push({ id: k, measure: k, pivot: null, label: k }));
+    }
 
     // --- FUNÇÕES ESTATÍSTICAS ---
     const getMin = arr => Math.min(...arr);
     const getMax = arr => Math.max(...arr);
-    const getMean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-    const getMedian = arr => getPercentile(arr, 50);
+    const getMean = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
     const getPercentile = (arr, p) => {
       if (arr.length === 0) return 0;
       let sorted = arr.slice().sort((a, b) => a - b);
       let index = (p / 100) * (sorted.length - 1);
-      let lower = Math.floor(index);
-      let upper = lower + 1;
-      let weight = index % 1;
-      if (upper >= sorted.length) return sorted[lower];
-      return sorted[lower] * (1 - weight) + sorted[upper] * weight;
+      let lower = Math.floor(index), upper = lower + 1, weight = index % 1;
+      return upper >= sorted.length ? sorted[lower] : sorted[lower] * (1 - weight) + sorted[upper] * weight;
     };
+    const getMedian = arr => getPercentile(arr, 50);
 
     // --- ESTRUTURAR DADOS POR EIXO ---
     let valuesAll = [];
     let valuesByCol = {};
     let valuesByRow = [];
-    
-    pivotKeys.forEach(k => valuesByCol[k] = []);
+    columns.forEach(c => valuesByCol[c.id] = []);
 
     data.forEach((row, rowIndex) => {
       valuesByRow[rowIndex] = [];
-      let measureData = getMeasureContainer(row);
-      
-      if (measureData) {
-        pivotKeys.forEach(key => {
-          let cell = pivots.length > 0 ? measureData[key] : measureData;
-          if (cell && cell.value !== null && cell.value !== undefined) {
-            let val = Number(cell.value);
-            if (!isNaN(val)) {
-              valuesAll.push(val);
-              valuesByCol[key].push(val);
-              valuesByRow[rowIndex].push(val);
-            }
-          }
-        });
-      }
+      columns.forEach(c => {
+        let cell = null;
+        if (row[c.measure] !== undefined) {
+          cell = c.pivot ? row[c.measure][c.pivot] : row[c.measure];
+        }
+        let val = cell?.value !== undefined ? Number(cell.value) : null;
+        if (val !== null && !isNaN(val)) {
+          valuesAll.push(val);
+          valuesByCol[c.id].push(val);
+          valuesByRow[rowIndex].push(val);
+        }
+      });
     });
 
     const calculateDomain = (arr) => {
-      if (!arr || arr.length === 0) return { start: 0, center: 0, end: 1 };
+      if (!arr || arr.length === 0) return { start: 0, center: null, end: 1 };
       let start, center, end;
 
       if (config.startType === 'number') start = Number(config.startValue);
@@ -155,7 +167,7 @@ looker.plugins.visualizations.add({
     let domainAll = calculateDomain(valuesAll);
     let domainCols = {};
     let domainRows = [];
-    pivotKeys.forEach(k => domainCols[k] = calculateDomain(valuesByCol[k]));
+    columns.forEach(c => domainCols[c.id] = calculateDomain(valuesByCol[c.id]));
     valuesByRow.forEach((arr, i) => domainRows[i] = calculateDomain(arr));
 
     // --- FUNÇÃO DE CORES ---
@@ -187,25 +199,18 @@ looker.plugins.visualizations.add({
           color1 = cMid; color2 = cEnd;
         }
       }
-
-      let r = Math.round(color1[0] + factor * (color2[0] - color1[0]));
-      let g = Math.round(color1[1] + factor * (color2[1] - color1[1]));
-      let b = Math.round(color1[2] + factor * (color2[2] - color1[2]));
-      return `rgb(${r}, ${g}, ${b})`;
+      return `rgb(${Math.round(color1[0] + factor * (color2[0] - color1[0]))}, ${Math.round(color1[1] + factor * (color2[1] - color1[1]))}, ${Math.round(color1[2] + factor * (color2[2] - color1[2]))})`;
     };
 
     // --- RENDERIZAR TABELA ---
     let html = `<table class="adv-heatmap-table"><thead><tr>`;
     
     dimensions.forEach(d => {
-      html += `<th>${d.label_short || d.label}</th>`;
+      let dimLabel = d.label_short || d.label || d.name || "Dimensão";
+      html += `<th>${dimLabel}</th>`;
     });
     
-    if (pivots.length > 0) {
-      pivots.forEach(p => { html += `<th>${p.key}</th>`; });
-    } else {
-      html += `<th>${primaryMeasure.label_short || primaryMeasure.label}</th>`;
-    }
+    columns.forEach(c => { html += `<th>${c.label}</th>`; });
     html += `</tr></thead><tbody>`;
 
     data.forEach((row, rowIndex) => {
@@ -213,31 +218,27 @@ looker.plugins.visualizations.add({
       
       dimensions.forEach(d => {
         let dimCell = row[d.name];
-        let dimVal = dimCell?.rendered !== undefined && dimCell?.rendered !== null ? dimCell.rendered : (dimCell?.value !== undefined ? dimCell.value : '');
+        let dimVal = dimCell?.rendered !== undefined ? dimCell.rendered : (dimCell?.value !== undefined ? dimCell.value : '');
         html += `<td class="dim-cell">${dimVal}</td>`;
       });
 
-      let measureData = getMeasureContainer(row);
-
-      pivotKeys.forEach(key => {
+      columns.forEach(c => {
         let cell = null;
-        if (measureData) {
-          cell = pivots.length > 0 ? measureData[key] : measureData;
+        if (row[c.measure] !== undefined) {
+          cell = c.pivot ? row[c.measure][c.pivot] : row[c.measure];
         }
         
         let val = cell?.value !== undefined ? Number(cell.value) : null;
-        let rendered = cell?.rendered !== undefined && cell?.rendered !== null ? cell.rendered : (val !== null ? val : '');
+        let rendered = cell?.rendered !== undefined ? cell.rendered : (val !== null ? val : '');
         
         let bgColor = "transparent";
         if (val !== null && !isNaN(val)) {
-          let currentDomain;
+          let currentDomain = domainAll;
           if (config.applyTo === 'row') currentDomain = domainRows[rowIndex] || domainAll;
-          else if (config.applyTo === 'col') currentDomain = domainCols[key] || domainAll;
-          else currentDomain = domainAll;
+          else if (config.applyTo === 'col') currentDomain = domainCols[c.id] || domainAll;
 
           bgColor = interpolateColor(val, currentDomain);
         }
-
         html += `<td style="background-color: ${bgColor}; color: #202124;">${rendered}</td>`;
       });
       html += `</tr>`;
@@ -245,7 +246,6 @@ looker.plugins.visualizations.add({
 
     html += `</tbody></table>`;
     container.innerHTML = html;
-
     done();
   }
 });
