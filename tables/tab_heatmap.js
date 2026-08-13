@@ -1,6 +1,6 @@
 looker.plugins.visualizations.add({
-  id: "heatmap_definitivo",
-  label: "Heatmap (Blindado)",
+  id: "heatmap_definitivo_sem_zeros",
+  label: "Heatmap (Blindado e Sem Zeros)",
   options: {
     // --- SEÇÃO 1: APLICAÇÃO ---
     applyTo: {
@@ -56,16 +56,16 @@ looker.plugins.visualizations.add({
       done(); return;
     }
 
-    // 1. CAPTURAR DIMENSÕES (usando dimension_like para pegar cálculos de dimensão também)
+    // 1. CAPTURAR DIMENSÕES
     const dimensions = queryResponse.fields.dimension_like || queryResponse.fields.dimensions || [];
     
-    // 2. CAPTURAR MEDIDAS (usando measure_like para garantir que Table Calculations entrem aqui)
+    // 2. CAPTURAR MEDIDAS
     let measures = queryResponse.fields.measure_like || queryResponse.fields.measures || [];
     if (measures.length === 0 && queryResponse.fields.table_calculations) {
       measures = queryResponse.fields.table_calculations;
     }
 
-    // 3. MAPEAMENTO DINÂMICO DE COLUNAS (Lê a linha 0 para descobrir a estrutura real)
+    // 3. MAPEAMENTO DINÂMICO DE COLUNAS
     let columns = [];
     
     measures.forEach(m => {
@@ -74,13 +74,12 @@ looker.plugins.visualizations.add({
       let isPivotedInData = false;
       let pivotKeysInData = [];
 
-      // Inspeciona os dados para ver se a métrica possui chaves de pivot internas
       for (let i = 0; i < data.length; i++) {
         if (data[i][mName]) {
           let cellData = data[i][mName];
           if (typeof cellData === 'object' && cellData !== null && cellData.value === undefined) {
             isPivotedInData = true;
-            pivotKeysInData = Object.keys(cellData).filter(k => !k.includes('$$$')); // Remove totais de linha do Looker
+            pivotKeysInData = Object.keys(cellData).filter(k => !k.includes('$$$'));
           }
           break;
         }
@@ -92,7 +91,7 @@ looker.plugins.visualizations.add({
             id: mName + '|' + pk,
             measure: mName,
             pivot: pk,
-            label: measures.length > 1 ? (mLabel + ' - ' + pk) : pk // Se for só 1 métrica, usa só o nome do pivot
+            label: measures.length > 1 ? (mLabel + ' - ' + pk) : pk
           });
         });
       } else {
@@ -100,7 +99,6 @@ looker.plugins.visualizations.add({
       }
     });
 
-    // Fallback Extremo: Se os metadados falharem totalmente, lê as chaves direto do JSON de dados
     if (columns.length === 0) {
       let dimNames = dimensions.map(d => d.name);
       let rawKeys = Object.keys(data[0]).filter(k => !dimNames.includes(k));
@@ -133,7 +131,11 @@ looker.plugins.visualizations.add({
         if (row[c.measure] !== undefined) {
           cell = c.pivot ? row[c.measure][c.pivot] : row[c.measure];
         }
-        let val = cell?.value !== undefined ? Number(cell.value) : null;
+        
+        let rawVal = cell?.value;
+        // Validação rigorosa contra nulos e strings vazias antes de converter para Número
+        let val = (rawVal !== undefined && rawVal !== null && rawVal !== '') ? Number(rawVal) : null;
+        
         if (val !== null && !isNaN(val)) {
           valuesAll.push(val);
           valuesByCol[c.id].push(val);
@@ -228,8 +230,10 @@ looker.plugins.visualizations.add({
           cell = c.pivot ? row[c.measure][c.pivot] : row[c.measure];
         }
         
-        let val = cell?.value !== undefined ? Number(cell.value) : null;
-        let rendered = cell?.rendered !== undefined ? cell.rendered : (val !== null ? val : '');
+        let rawVal = cell?.value;
+        let val = (rawVal !== undefined && rawVal !== null && rawVal !== '') ? Number(rawVal) : null;
+        // Se for nulo, imprime uma string vazia ao invés de zero
+        let rendered = cell?.rendered !== undefined ? cell.rendered : (val !== null && !isNaN(val) ? val : '');
         
         let bgColor = "transparent";
         if (val !== null && !isNaN(val)) {
