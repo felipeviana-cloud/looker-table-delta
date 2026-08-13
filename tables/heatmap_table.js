@@ -1,6 +1,6 @@
 looker.plugins.visualizations.add({
-  id: "heatmap_avancado",
-  label: "Heatmap Customizável",
+  id: "heatmap_avancado_seguro",
+  label: "Heatmap Avançado (Anti-Undefined)",
   options: {
     // --- SEÇÃO 1: APLICAÇÃO ---
     applyTo: {
@@ -49,7 +49,7 @@ looker.plugins.visualizations.add({
     element.innerHTML = `
       <style>
         .adv-heatmap-table { width: 100%; border-collapse: collapse; font-family: "Open Sans", Arial, sans-serif; font-size: 12px; }
-        .adv-heatmap-table th, .adv-heatmap-table td { border: 1px solid #e5e5e5; padding: 6px 10px; text-align: right; }
+        .adv-heatmap-table th, .adv-heatmap-table td { border: 1px solid #e5e5e5; padding: 6px 10px; text-align: right; white-space: nowrap; }
         .adv-heatmap-table th { background-color: #f5f6f7; font-weight: 600; text-align: center; }
         .adv-heatmap-table td.dim-cell { text-align: left; font-weight: bold; background-color: #fafafa; }
       </style>
@@ -60,15 +60,32 @@ looker.plugins.visualizations.add({
   updateAsync: function(data, element, config, queryResponse, details, done) {
     this.clearErrors();
 
-    if (queryResponse.fields.dimensions.length === 0 || queryResponse.fields.measures.length === 0) {
-      this.addError({title: "Dados Incompletos", message: "Adicione dimensões e medidas."});
+    if (!data || data.length === 0) {
+      this.addError({title: "Sem dados", message: "A query não retornou dados."});
       return;
     }
 
     const container = element.querySelector("#table-container");
-    const dimensions = queryResponse.fields.dimensions;
-    const measure = queryResponse.fields.measures[0];
+    const dimensions = queryResponse.fields.dimensions || [];
+    const measures = queryResponse.fields.measures || [];
     const pivots = queryResponse.fields.pivots || [];
+    
+    if (dimensions.length === 0 || measures.length === 0) {
+      this.addError({title: "Configuração Incompleta", message: "Adicione ao menos uma dimensão e uma métrica."});
+      return;
+    }
+
+    // Identificar a métrica principal de forma segura
+    const primaryMeasure = measures[0];
+    
+    // Função auxiliar para encontrar a chave correta da medida no objeto de dados da linha
+    const getMeasureContainer = (row) => {
+      if (row[primaryMeasure.name]) return row[primaryMeasure.name];
+      // Fallback: procura qualquer chave que contenha o nome da medida ou seja um objeto com os pivots
+      let foundKey = Object.keys(row).find(k => k.includes(primaryMeasure.name.split('.').pop()) || (typeof row[k] === 'object' && row[k] !== null && !dimensions.some(d => d.name === k)));
+      return foundKey ? row[foundKey] : null;
+    };
+
     const pivotKeys = pivots.length > 0 ? pivots.map(p => p.key) : ['no_pivot'];
 
     // --- FUNÇÕES ESTATÍSTICAS ---
@@ -96,39 +113,41 @@ looker.plugins.visualizations.add({
 
     data.forEach((row, rowIndex) => {
       valuesByRow[rowIndex] = [];
-      pivotKeys.forEach(key => {
-        let cell = pivots.length > 0 ? row[measure.name][key] : row[measure.name];
-        if (cell && cell.value !== null && cell.value !== undefined) {
-          valuesAll.push(cell.value);
-          valuesByCol[key].push(cell.value);
-          valuesByRow[rowIndex].push(cell.value);
-        }
-      });
+      let measureData = getMeasureContainer(row);
+      
+      if (measureData) {
+        pivotKeys.forEach(key => {
+          let cell = pivots.length > 0 ? measureData[key] : measureData;
+          if (cell && cell.value !== null && cell.value !== undefined) {
+            let val = Number(cell.value);
+            if (!isNaN(val)) {
+              valuesAll.push(val);
+              valuesByCol[key].push(val);
+              valuesByRow[rowIndex].push(val);
+            }
+          }
+        });
+      }
     });
 
-    // Função para calcular Start, Mid, End dependendo do Eixo (arr = array de referência)
     const calculateDomain = (arr) => {
-      if (!arr || arr.length === 0) return { start: 0, center: 0, end: 0 };
-      
+      if (!arr || arr.length === 0) return { start: 0, center: 0, end: 1 };
       let start, center, end;
 
-      // START
-      if (config.startType === 'number') start = config.startValue;
-      else if (config.startType === 'percentile') start = getPercentile(arr, config.startValue);
-      else start = getMin(arr); // Min
+      if (config.startType === 'number') start = Number(config.startValue);
+      else if (config.startType === 'percentile') start = getPercentile(arr, Number(config.startValue));
+      else start = getMin(arr);
 
-      // END
-      if (config.endType === 'number') end = config.endValue;
-      else if (config.endType === 'percentile') end = getPercentile(arr, config.endValue);
-      else end = getMax(arr); // Max
+      if (config.endType === 'number') end = Number(config.endValue);
+      else if (config.endType === 'percentile') end = getPercentile(arr, Number(config.endValue));
+      else end = getMax(arr);
 
-      // CENTER
-      if (config.centerType === 'number') center = config.centerValue;
-      else if (config.centerType === 'percentile') center = getPercentile(arr, config.centerValue);
+      if (config.centerType === 'number') center = Number(config.centerValue);
+      else if (config.centerType === 'percentile') center = getPercentile(arr, Number(config.centerValue));
       else if (config.centerType === 'median') center = getMedian(arr);
       else if (config.centerType === 'mean') center = getMean(arr);
       else if (config.centerType === 'mid') center = start + (end - start) / 2;
-      else center = null; // None
+      else center = null;
 
       return { start, center, end };
     };
@@ -141,26 +160,23 @@ looker.plugins.visualizations.add({
 
     // --- FUNÇÃO DE CORES ---
     const hexToRgb = hex => {
-      let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "#ffffff");
       return result ? [parseInt(result[1], 16), parseInt(result[2], 16), parseInt(result[3], 16)] : [255,255,255];
     };
     
     let cStart = hexToRgb(config.reverseColors ? config.colorEnd : config.colorStart);
-    let cMid = hexToRgb(config.colorMid); // Mid se inverte? Geralmente continua no meio.
+    let cMid = hexToRgb(config.colorMid);
     let cEnd = hexToRgb(config.reverseColors ? config.colorStart : config.colorEnd);
 
     const interpolateColor = (val, domain) => {
-      if (val === null || val === undefined) return 'transparent';
-      
+      if (val === null || val === undefined || isNaN(val)) return 'transparent';
       let color1, color2, factor;
 
       if (config.centerType === 'none' || domain.center === null) {
-        // Interpolação de 2 pontos
         factor = domain.end === domain.start ? 1 : (val - domain.start) / (domain.end - domain.start);
         factor = Math.max(0, Math.min(1, factor));
         color1 = cStart; color2 = cEnd;
       } else {
-        // Interpolação de 3 pontos
         if (val <= domain.center) {
           factor = domain.center === domain.start ? 1 : (val - domain.start) / (domain.center - domain.start);
           factor = Math.max(0, Math.min(1, factor));
@@ -181,46 +197,48 @@ looker.plugins.visualizations.add({
     // --- RENDERIZAR TABELA ---
     let html = `<table class="adv-heatmap-table"><thead><tr>`;
     
-    // Cabeçalhos das Dimensões
     dimensions.forEach(d => {
       html += `<th>${d.label_short || d.label}</th>`;
     });
     
-    // Cabeçalhos dos Pivots ou da Medida
     if (pivots.length > 0) {
       pivots.forEach(p => { html += `<th>${p.key}</th>`; });
     } else {
-      html += `<th>${measure.label_short || measure.label}</th>`;
+      html += `<th>${primaryMeasure.label_short || primaryMeasure.label}</th>`;
     }
     html += `</tr></thead><tbody>`;
 
-    // Linhas
     data.forEach((row, rowIndex) => {
       html += `<tr>`;
       
-      // Células das Dimensões
       dimensions.forEach(d => {
-        let dimVal = row[d.name]?.rendered || row[d.name]?.value || '';
+        let dimCell = row[d.name];
+        let dimVal = dimCell?.rendered !== undefined && dimCell?.rendered !== null ? dimCell.rendered : (dimCell?.value !== undefined ? dimCell.value : '');
         html += `<td class="dim-cell">${dimVal}</td>`;
       });
 
-      // Células de Valores
+      let measureData = getMeasureContainer(row);
+
       pivotKeys.forEach(key => {
-        let cell = pivots.length > 0 ? row[measure.name][key] : row[measure.name];
-        let val = cell?.value;
-        let rendered = cell?.rendered || val;
+        let cell = null;
+        if (measureData) {
+          cell = pivots.length > 0 ? measureData[key] : measureData;
+        }
+        
+        let val = cell?.value !== undefined ? Number(cell.value) : null;
+        let rendered = cell?.rendered !== undefined && cell?.rendered !== null ? cell.rendered : (val !== null ? val : '');
         
         let bgColor = "transparent";
-        if (val !== undefined && val !== null) {
+        if (val !== null && !isNaN(val)) {
           let currentDomain;
-          if (config.applyTo === 'row') currentDomain = domainRows[rowIndex];
-          else if (config.applyTo === 'col') currentDomain = domainCols[key];
+          if (config.applyTo === 'row') currentDomain = domainRows[rowIndex] || domainAll;
+          else if (config.applyTo === 'col') currentDomain = domainCols[key] || domainAll;
           else currentDomain = domainAll;
 
           bgColor = interpolateColor(val, currentDomain);
         }
 
-        html += `<td style="background-color: ${bgColor}; color: #202124;">${rendered !== undefined && rendered !== null ? rendered : ''}</td>`;
+        html += `<td style="background-color: ${bgColor}; color: #202124;">${rendered}</td>`;
       });
       html += `</tr>`;
     });
