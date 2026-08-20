@@ -2,14 +2,8 @@ looker.plugins.visualizations.add({
   id: "multiple_metric_compare",
   label: "Múltiplas Métricas com Comparação",
   
-  // Opções gerais agora segmentadas por elemento
+  // Opções gerais apenas para controle de Fontes
   options: {
-    minGap: {
-      section: "Configurações Gerais",
-      type: "number",
-      label: "Espaçamento Mínimo (px)",
-      default: 20
-    },
     valueFontSize: {
       section: "Configurações Gerais",
       type: "number",
@@ -49,48 +43,60 @@ looker.plugins.visualizations.add({
   },
 
   create: function(element, config) {
-    // Uso de variáveis CSS para facilitar a responsividade no JS
     element.innerHTML = `
       <style>
         .metric-container {
-          /* Fonte padrão do Looker */
           font-family: Roboto, "Open Sans", "Noto Sans", "Segoe UI", Arial, sans-serif;
           display: flex;
           flex-direction: row;
           justify-content: center;
-          align-items: flex-start;
+          align-items: stretch; /* Stretch permite que a linha pontilhada centralize na vertical perfeitamente */
           width: 100%;
           height: 100%;
-          overflow-x: auto;
+          overflow-x: hidden; /* Começa escondido para evitar o scroll ao máximo */
           overflow-y: hidden;
           box-sizing: border-box;
           padding: 10px;
           color: #333333;
         }
         .metric-card {
+          position: relative;
           display: flex;
           flex-direction: column;
           align-items: center;
+          justify-content: center;
           text-align: center;
-          flex-shrink: 0;
+          flex: 1 1 0; /* Distribui as métricas em larguras iguais */
+          min-width: 0; /* Essencial para permitir a quebra de linha sem vazar o card */
         }
+        
+        /* LINHA PONTILHADA CENTRALIZADA */
+        .metric-card:not(:last-child)::after {
+          content: "";
+          position: absolute;
+          /* Posiciona a linha exatamente no meio do 'gap' (espaçamento) calculado pelo JS */
+          right: calc((var(--half-gap, 5px) * -1) - 1px); 
+          top: 20%;
+          height: 60%;
+          border-right: 2px dotted #e0e0e0; /* Cinza bem claro */
+        }
+
         .metric-title {
-          word-break: break-word;
           margin-bottom: 8px;
-          flex-grow: 1;
           display: flex;
           align-items: flex-end;
           color: #555555;
+          text-align: center;
         }
         .metric-variation, .metric-value {
-          white-space: nowrap;
+          white-space: nowrap; /* Valores nunca quebram linha */
           margin-top: 4px;
         }
         .metric-variation {
           font-weight: 600;
         }
         .metric-value {
-          font-weight: bold; /* Valor principal em negrito como solicitado */
+          font-weight: bold;
         }
       </style>
       <div id="vis-container" class="metric-container"></div>
@@ -111,7 +117,6 @@ looker.plugins.visualizations.add({
       return;
     }
 
-    // Gerar opções dinâmicas de comparação
     let dynamicOptions = { ...this.options };
     let metricChoices = [{ "Nenhum": "none" }];
     
@@ -155,7 +160,6 @@ looker.plugins.visualizations.add({
 
     this.trigger('registerOptions', dynamicOptions);
 
-    // Montar HTML dos cards
     let row = data[0]; 
     this.container.innerHTML = "";
 
@@ -196,7 +200,6 @@ looker.plugins.visualizations.add({
       this.container.appendChild(card);
     });
 
-    // Responsividade
     this.applyResponsiveLayout(config);
 
     done();
@@ -206,39 +209,55 @@ looker.plugins.visualizations.add({
     let container = this.container;
     
     // Limites Mínimos
-    let minGap = config.minGap || 20;
     let minTitleSize = config.titleMinFontSize || 10;
     let minValueSize = config.valueMinFontSize || 18;
     let minVariationSize = config.variationMinFontSize || 10;
     
-    // Valores Iniciais (Puxados da Configuração)
-    let currentGap = 80;
+    // Valores Iniciais (Começamos com espaçamento grande)
+    let currentGap = 60; 
     let currentTitleSize = config.titleFontSize || 14;
     let currentValueSize = config.valueFontSize || 32;
     let currentVariationSize = config.variationFontSize || 14;
 
-    // Aplicar CSS Variables Iniciais
-    container.style.gap = currentGap + "px";
-    
     let titles = container.querySelectorAll(".metric-title");
     let values = container.querySelectorAll(".metric-value");
     let variations = container.querySelectorAll(".metric-variation");
 
-    const updateFonts = () => {
+    // RESET para cálculo: Títulos forçados em 1 linha e container sem scroll
+    titles.forEach(el => {
+      el.style.whiteSpace = "nowrap";
+      el.style.wordBreak = "normal";
+    });
+    container.style.overflowX = "hidden";
+
+    // Função de atualização injetável
+    const updateStyles = () => {
+      container.style.gap = currentGap + "px";
+      // Informa ao CSS qual a metade do Gap para a linha pontilhada se alinhar perfeitamente
+      container.style.setProperty('--half-gap', (currentGap / 2) + "px");
+      
       titles.forEach(el => el.style.fontSize = currentTitleSize + "px");
       values.forEach(el => el.style.fontSize = currentValueSize + "px");
       variations.forEach(el => el.style.fontSize = currentVariationSize + "px");
     };
     
-    updateFonts();
+    updateStyles();
 
-    // 1ª Regra: Reduzir Gap
-    while (container.scrollWidth > container.clientWidth && currentGap > minGap) {
+    // REGRA 1: Reduzir Gap até o mínimo de 10px
+    while (container.scrollWidth > container.clientWidth && currentGap > 10) {
       currentGap -= 2;
-      container.style.gap = currentGap + "px";
+      updateStyles();
     }
 
-    // 2ª Regra: Reduzir Fontes individualmente se ainda estiver estourando a tela
+    // REGRA 2: Chegou em 10px e ainda falta espaço? Quebra a linha dos títulos!
+    if (container.scrollWidth > container.clientWidth) {
+      titles.forEach(el => {
+        el.style.whiteSpace = "normal"; 
+        el.style.wordBreak = "break-word";
+      });
+    }
+
+    // REGRA 3: Se mesmo quebrando a linha dos títulos os valores estiverem empurrando o container, reduz fontes
     while (container.scrollWidth > container.clientWidth) {
       let reducedAny = false;
 
@@ -255,11 +274,13 @@ looker.plugins.visualizations.add({
         reducedAny = true;
       }
 
-      // Atualiza os estilos
-      updateFonts();
+      updateStyles();
 
-      // Se nenhum elemento pôde ser mais reduzido, sai do loop
-      if (!reducedAny) break; 
+      // REGRA 4: Só ativa o scroll se esgotar todas as reduções de tamanho
+      if (!reducedAny) {
+        container.style.overflowX = "auto";
+        break; 
+      }
     }
   }
 });
