@@ -2,7 +2,6 @@ looker.plugins.visualizations.add({
   id: "multiple_metric_compare",
   label: "Múltiplas Métricas com Comparação",
   
-  // Apenas as opções que você pediu: Padrão e Mínimo Geral
   options: {
     baseFontSize: {
       section: "Configurações Gerais",
@@ -24,66 +23,67 @@ looker.plugins.visualizations.add({
         .vis-wrapper {
           font-family: Roboto, "Open Sans", "Noto Sans", "Segoe UI", Arial, sans-serif;
           width: 100%;
-          height: 100%;
+          height: 100%; /* Ocupa todo o espaço útil do tile */
           display: flex;
-          align-items: center; 
+          align-items: center; /* Centraliza verticalmente o bloco de métricas no tile */
           justify-content: center;
-          overflow: hidden; /* Evita o scroll ao máximo */
+          overflow: hidden; /* Evita scroll */
           box-sizing: border-box;
           padding: 5px;
         }
         .metric-container {
           display: flex;
           flex-direction: row;
+          align-items: stretch; /* FORÇA todos os cards a terem a mesma altura */
           width: 100%;
-          height: 100%;
         }
         .metric-card {
-          flex: 1 1 0; /* Divide a tela exatamente em partes iguais */
+          flex: 1 1 0; /* Divide o espaço horizontal em partes iguais */
           display: flex;
+          flex-direction: column;
           position: relative;
           box-sizing: border-box;
-          /* O Padding será controlado no JS, nunca menor que 5px */
         }
         
-        /* A LINHA PONTILHADA AGORA FICA PRESA À BORDA DIREITA */
+        /* Linha pontilhada padronizada para 80% da altura do card */
         .metric-card:not(:last-child)::after {
           content: "";
           position: absolute;
           right: 0;
-          top: 20%;
-          height: 60%;
+          top: 10%;
+          height: 80%;
           border-right: 2px dotted #cccccc;
         }
 
-        .metric-content {
+        /* O CONTAINER DO TÍTULO É O SEGREDO DO ALINHAMENTO */
+        .metric-title-container {
+          flex-grow: 1; /* Ocupa todo o espaço livre no topo */
           display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center; /* Centraliza tudo perfeitamente para não cortar o topo */
+          align-items: flex-end; /* Empurra o texto para a base, alinhando todos pela linha de baixo */
+          justify-content: center;
           width: 100%;
-          height: 100%;
-          text-align: center;
+          margin-bottom: 6px;
         }
         .metric-title {
           color: #555555;
-          margin-bottom: 4px;
           width: 100%;
+          text-align: center;
           word-break: break-word;
           overflow-wrap: break-word;
           line-height: 1.2;
         }
-        .metric-variation, .metric-value {
-          white-space: nowrap; /* Valores NUNCA quebram */
-          line-height: 1.2;
-        }
+
         .metric-variation {
+          white-space: nowrap; /* Não quebra linha */
           font-weight: 600;
           margin-bottom: 2px;
+          text-align: center;
         }
         .metric-value {
+          white-space: nowrap; /* Não quebra linha */
           font-weight: bold;
           color: #333333;
+          text-align: center;
         }
       </style>
       <div class="vis-wrapper">
@@ -183,11 +183,11 @@ looker.plugins.visualizations.add({
       let card = document.createElement("div");
       card.className = "metric-card";
       card.innerHTML = `
-        <div class="metric-content">
+        <div class="metric-title-container">
           <div class="metric-title">${m.label_short || m.label}</div>
-          ${variationHTML}
-          <div class="metric-value">${renderedVal}</div>
         </div>
+        ${variationHTML}
+        <div class="metric-value">${renderedVal}</div>
       `;
       this.container.appendChild(card);
     });
@@ -201,20 +201,17 @@ looker.plugins.visualizations.add({
     let wrapper = this.wrapper;
     let container = this.container;
     let cards = container.querySelectorAll('.metric-card');
-    let contents = container.querySelectorAll('.metric-content');
     let titles = container.querySelectorAll('.metric-title');
     let values = container.querySelectorAll('.metric-value');
     let variations = container.querySelectorAll('.metric-variation');
 
     let minSize = config.minFontSize || 10;
-    let valSize = 32; // Tamanho base pedido para o valor maior
+    let valSize = 32; 
     let titleSize = config.baseFontSize || 14;
     let varSize = config.baseFontSize || 14;
     
-    // Começa com folga (20px na esquerda + 20px na direita de cada card = muito espaço)
     let paddingLR = 20; 
 
-    // Função que aplica os tamanhos visualmente
     const updateStyles = () => {
       cards.forEach(c => {
         c.style.paddingLeft = paddingLR + "px";
@@ -225,15 +222,12 @@ looker.plugins.visualizations.add({
       values.forEach(v => v.style.fontSize = valSize + "px");
     };
 
-    // Função ninja que detecta colisão (Horizontal e Vertical)
     const isOverflowing = () => {
       if (wrapper.scrollWidth > wrapper.clientWidth) return true;
       if (wrapper.scrollHeight > wrapper.clientHeight) return true;
       
-      // Checa se o texto dentro do card está estourando o limite físico do card
-      for (let i = 0; i < contents.length; i++) {
-        if (contents[i].scrollWidth > contents[i].clientWidth) return true;
-        if (contents[i].scrollHeight > cards[i].clientHeight) return true; 
+      for (let i = 0; i < cards.length; i++) {
+        if (cards[i].scrollWidth > cards[i].clientWidth) return true;
       }
       return false;
     };
@@ -242,7 +236,7 @@ looker.plugins.visualizations.add({
     titles.forEach(t => t.style.whiteSpace = "nowrap");
     updateStyles();
 
-    // 2º Passo: Reduz as distâncias laterais até encostar em 5px (seu limite de segurança)
+    // 2º Passo: Reduz as distâncias laterais até encostar em 5px
     while (isOverflowing() && paddingLR > 5) {
       paddingLR--;
       updateStyles();
@@ -254,7 +248,7 @@ looker.plugins.visualizations.add({
       updateStyles(); 
     }
 
-    // 4º Passo: Mesmo quebrando linha o card esticou demais pra baixo ou pros lados? DIMINUI A FONTE
+    // 4º Passo: Reduz a fonte gradativamente até o limite
     while (isOverflowing()) {
       let reduced = false;
       
@@ -264,7 +258,6 @@ looker.plugins.visualizations.add({
       
       updateStyles();
 
-      // Se todas as fontes atingiram o tamanho mínimo, para o loop e libera o overflow-x de emergência
       if (!reduced) {
         wrapper.style.overflowX = "auto";
         wrapper.style.overflowY = "auto";
