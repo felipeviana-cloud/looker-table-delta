@@ -2,7 +2,6 @@ looker.plugins.visualizations.add({
   id: "multiple_metric_compare",
   label: "Múltiplas Métricas com Comparação",
   
-  // Opções gerais apenas para controle de Fontes
   options: {
     valueFontSize: {
       section: "Configurações Gerais",
@@ -50,10 +49,10 @@ looker.plugins.visualizations.add({
           display: flex;
           flex-direction: row;
           justify-content: center;
-          align-items: stretch; /* Stretch permite que a linha pontilhada centralize na vertical perfeitamente */
+          align-items: stretch;
           width: 100%;
           height: 100%;
-          overflow-x: hidden; /* Começa escondido para evitar o scroll ao máximo */
+          overflow-x: hidden;
           overflow-y: hidden;
           box-sizing: border-box;
           padding: 10px;
@@ -64,32 +63,43 @@ looker.plugins.visualizations.add({
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
-          text-align: center;
-          flex: 1 1 0; /* Distribui as métricas em larguras iguais */
-          min-width: 0; /* Essencial para permitir a quebra de linha sem vazar o card */
+          justify-content: flex-end; /* Empurra tudo pro fundo, alinhando os valores mesmo se um título tiver 3 linhas */
+          flex: 1 1 0;
+          min-width: 0; /* REGRA DE OURO: Impede que o card vaze do espaço dele */
         }
         
-        /* LINHA PONTILHADA CENTRALIZADA */
+        /* LINHA PONTILHADA - Centralizada no Gap */
         .metric-card:not(:last-child)::after {
           content: "";
           position: absolute;
-          /* Posiciona a linha exatamente no meio do 'gap' (espaçamento) calculado pelo JS */
-          right: calc((var(--half-gap, 5px) * -1) - 1px); 
+          /* Se o gap for 10px, a linha fica exatamente a -5px, garantindo 5px de respiro de cada lado */
+          right: calc((var(--current-gap) / -2) - 1px); 
           top: 20%;
           height: 60%;
-          border-right: 2px dotted #e0e0e0; /* Cinza bem claro */
+          border-right: 2px dotted #e0e0e0;
         }
 
         .metric-title {
-          margin-bottom: 8px;
+          width: 100%;
+          flex-grow: 1;
           display: flex;
           align-items: flex-end;
+          justify-content: center;
+          margin-bottom: 8px;
           color: #555555;
-          text-align: center;
+          min-width: 0; /* Previne invasão horizontal */
         }
+        
+        .title-text {
+          width: 100%;
+          text-align: center;
+          word-break: break-word;
+          overflow-wrap: break-word;
+          /* A quebra de linha será controlada pelo JS aqui */
+        }
+
         .metric-variation, .metric-value {
-          white-space: nowrap; /* Valores nunca quebram linha */
+          white-space: nowrap; 
           margin-top: 4px;
         }
         .metric-variation {
@@ -193,7 +203,7 @@ looker.plugins.visualizations.add({
       let card = document.createElement("div");
       card.className = "metric-card";
       card.innerHTML = `
-        <div class="metric-title">${m.label_short || m.label}</div>
+        <div class="metric-title"><span class="title-text">${m.label_short || m.label}</span></div>
         ${variationHTML}
         <div class="metric-value">${renderedVal}</div>
       `;
@@ -208,33 +218,27 @@ looker.plugins.visualizations.add({
   applyResponsiveLayout: function(config) {
     let container = this.container;
     
-    // Limites Mínimos
     let minTitleSize = config.titleMinFontSize || 10;
     let minValueSize = config.valueMinFontSize || 18;
     let minVariationSize = config.variationMinFontSize || 10;
     
-    // Valores Iniciais (Começamos com espaçamento grande)
     let currentGap = 60; 
     let currentTitleSize = config.titleFontSize || 14;
     let currentValueSize = config.valueFontSize || 32;
     let currentVariationSize = config.variationFontSize || 14;
 
-    let titles = container.querySelectorAll(".metric-title");
+    // Mira especificamente no <span> de texto agora
+    let titles = container.querySelectorAll(".title-text");
     let values = container.querySelectorAll(".metric-value");
     let variations = container.querySelectorAll(".metric-variation");
 
-    // RESET para cálculo: Títulos forçados em 1 linha e container sem scroll
-    titles.forEach(el => {
-      el.style.whiteSpace = "nowrap";
-      el.style.wordBreak = "normal";
-    });
+    // Bloqueia a quebra no começo do cálculo
+    titles.forEach(el => el.style.whiteSpace = "nowrap");
     container.style.overflowX = "hidden";
 
-    // Função de atualização injetável
     const updateStyles = () => {
       container.style.gap = currentGap + "px";
-      // Informa ao CSS qual a metade do Gap para a linha pontilhada se alinhar perfeitamente
-      container.style.setProperty('--half-gap', (currentGap / 2) + "px");
+      container.style.setProperty('--current-gap', currentGap + "px");
       
       titles.forEach(el => el.style.fontSize = currentTitleSize + "px");
       values.forEach(el => el.style.fontSize = currentValueSize + "px");
@@ -243,21 +247,18 @@ looker.plugins.visualizations.add({
     
     updateStyles();
 
-    // REGRA 1: Reduzir Gap até o mínimo de 10px
+    // 1º: Reduz até os 10px permitidos (5px pra cada lado da linha pontilhada)
     while (container.scrollWidth > container.clientWidth && currentGap > 10) {
       currentGap -= 2;
       updateStyles();
     }
 
-    // REGRA 2: Chegou em 10px e ainda falta espaço? Quebra a linha dos títulos!
+    // 2º: Bateu nos 10px e ainda precisa de espaço? Ativa a quebra de linha no texto
     if (container.scrollWidth > container.clientWidth) {
-      titles.forEach(el => {
-        el.style.whiteSpace = "normal"; 
-        el.style.wordBreak = "break-word";
-      });
+      titles.forEach(el => el.style.whiteSpace = "normal");
     }
 
-    // REGRA 3: Se mesmo quebrando a linha dos títulos os valores estiverem empurrando o container, reduz fontes
+    // 3º: Se quebrar a linha não bastou, reduzimos as fontes gradativamente
     while (container.scrollWidth > container.clientWidth) {
       let reducedAny = false;
 
@@ -276,7 +277,7 @@ looker.plugins.visualizations.add({
 
       updateStyles();
 
-      // REGRA 4: Só ativa o scroll se esgotar todas as reduções de tamanho
+      // 4º: Esgotou todos os mínimos? Só então ativa o scroll horizontal
       if (!reducedAny) {
         container.style.overflowX = "auto";
         break; 
