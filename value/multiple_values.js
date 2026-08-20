@@ -2,33 +2,59 @@ looker.plugins.visualizations.add({
   id: "multiple_metric_compare",
   label: "Múltiplas Métricas com Comparação",
   
-  // Opções gerais que sempre aparecem
+  // Opções gerais agora segmentadas por elemento
   options: {
-    baseFontSize: {
-      section: "Configurações Gerais",
-      type: "number",
-      label: "Tamanho da Fonte Inicial (px)",
-      default: 16
-    },
-    minFontSize: {
-      section: "Configurações Gerais",
-      type: "number",
-      label: "Tamanho da Fonte Mínimo (px)",
-      default: 10
-    },
     minGap: {
       section: "Configurações Gerais",
       type: "number",
       label: "Espaçamento Mínimo (px)",
       default: 20
+    },
+    valueFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Inicial: Valor (px)",
+      default: 32
+    },
+    valueMinFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Mínimo: Valor (px)",
+      default: 18
+    },
+    titleFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Inicial: Título (px)",
+      default: 14
+    },
+    titleMinFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Mínimo: Título (px)",
+      default: 10
+    },
+    variationFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Inicial: Variação (px)",
+      default: 14
+    },
+    variationMinFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Mínimo: Variação (px)",
+      default: 10
     }
   },
 
   create: function(element, config) {
-    // Criação do container principal
+    // Uso de variáveis CSS para facilitar a responsividade no JS
     element.innerHTML = `
       <style>
         .metric-container {
+          /* Fonte padrão do Looker */
+          font-family: Roboto, "Open Sans", "Noto Sans", "Segoe UI", Arial, sans-serif;
           display: flex;
           flex-direction: row;
           justify-content: center;
@@ -39,31 +65,32 @@ looker.plugins.visualizations.add({
           overflow-y: hidden;
           box-sizing: border-box;
           padding: 10px;
+          color: #333333;
         }
         .metric-card {
           display: flex;
           flex-direction: column;
           align-items: center;
           text-align: center;
-          flex-shrink: 0; /* Impede que o card amasse */
+          flex-shrink: 0;
         }
         .metric-title {
-          font-weight: bold;
-          word-break: break-word; /* Permite quebra de linha no título */
+          word-break: break-word;
           margin-bottom: 8px;
-          flex-grow: 1; /* Mantém alinhamento horizontal se os títulos tiverem linhas diferentes */
+          flex-grow: 1;
           display: flex;
           align-items: flex-end;
+          color: #555555;
         }
         .metric-variation, .metric-value {
-          white-space: nowrap; /* Não quebra linha nos valores */
+          white-space: nowrap;
           margin-top: 4px;
         }
         .metric-variation {
           font-weight: 600;
         }
         .metric-value {
-          font-size: 1.2em;
+          font-weight: bold; /* Valor principal em negrito como solicitado */
         }
       </style>
       <div id="vis-container" class="metric-container"></div>
@@ -78,16 +105,15 @@ looker.plugins.visualizations.add({
       return;
     }
 
-    // 1. Extrair métricas (measures e table calculations)
     let measures = queryResponse.fields.measure_like;
     if (measures.length === 0) {
       this.addError({title: "Faltam Métricas", message: "Adicione ao menos uma métrica."});
       return;
     }
 
-    // 2. Gerar opções dinâmicas para cada métrica
+    // Gerar opções dinâmicas de comparação
     let dynamicOptions = { ...this.options };
-    let metricChoices = [{ [ "Nenhum" ]: "none" }];
+    let metricChoices = [{ "Nenhum": "none" }];
     
     measures.forEach(m => {
       metricChoices.push({ [ m.label_short || m.label ]: m.name });
@@ -127,11 +153,10 @@ looker.plugins.visualizations.add({
       };
     });
 
-    // Registra as novas opções no painel do Looker
     this.trigger('registerOptions', dynamicOptions);
 
-    // 3. Montar o HTML
-    let row = data[0]; // Assume query de linha única (totais/scorecard)
+    // Montar HTML dos cards
+    let row = data[0]; 
     this.container.innerHTML = "";
 
     measures.forEach(m => {
@@ -139,7 +164,7 @@ looker.plugins.visualizations.add({
       let renderedVal = row[m.name].rendered || val;
       
       let compareTo = config[`compare_to_${m.name}`];
-      let variationHTML = `<div class="metric-variation" style="visibility: hidden;">-</div>`; // Espaço vazio para alinhar
+      let variationHTML = `<div class="metric-variation" style="visibility: hidden;">-</div>`; 
 
       if (compareTo && compareTo !== "none" && row[compareTo]) {
         let compVal = row[compareTo].value;
@@ -151,8 +176,7 @@ looker.plugins.visualizations.add({
           diff = compVal !== 0 ? ((val - compVal) / Math.abs(compVal)) * 100 : 0;
           variationText = (diff > 0 ? "+" : "") + diff.toFixed(1) + "%";
         } else {
-          // Diferença direta para Pontos Percentuais
-          diff = (val - compVal) * 100; // Multiplica se o valor vier como decimal (ex: 0.05 = 5%)
+          diff = (val - compVal) * 100;
           variationText = (diff > 0 ? "+" : "") + diff.toFixed(1) + " p.p.";
         }
 
@@ -172,7 +196,7 @@ looker.plugins.visualizations.add({
       this.container.appendChild(card);
     });
 
-    // 4. Aplicar Lógica de Responsividade
+    // Responsividade
     this.applyResponsiveLayout(config);
 
     done();
@@ -180,31 +204,62 @@ looker.plugins.visualizations.add({
 
   applyResponsiveLayout: function(config) {
     let container = this.container;
-    let baseSize = config.baseFontSize || 16;
-    let minSize = config.minFontSize || 10;
-    let minGap = config.minGap || 20;
     
-    // Valores iniciais máximos
-    let currentGap = 80; // Espaço folgado inicial
-    let currentFontSize = baseSize;
+    // Limites Mínimos
+    let minGap = config.minGap || 20;
+    let minTitleSize = config.titleMinFontSize || 10;
+    let minValueSize = config.valueMinFontSize || 18;
+    let minVariationSize = config.variationMinFontSize || 10;
+    
+    // Valores Iniciais (Puxados da Configuração)
+    let currentGap = 80;
+    let currentTitleSize = config.titleFontSize || 14;
+    let currentValueSize = config.valueFontSize || 32;
+    let currentVariationSize = config.variationFontSize || 14;
 
-    // Reseta estilos para testar
+    // Aplicar CSS Variables Iniciais
     container.style.gap = currentGap + "px";
-    container.style.fontSize = currentFontSize + "px";
+    
+    let titles = container.querySelectorAll(".metric-title");
+    let values = container.querySelectorAll(".metric-value");
+    let variations = container.querySelectorAll(".metric-variation");
 
-    // 1ª Regra: Reduzir o Gap até o mínimo
+    const updateFonts = () => {
+      titles.forEach(el => el.style.fontSize = currentTitleSize + "px");
+      values.forEach(el => el.style.fontSize = currentValueSize + "px");
+      variations.forEach(el => el.style.fontSize = currentVariationSize + "px");
+    };
+    
+    updateFonts();
+
+    // 1ª Regra: Reduzir Gap
     while (container.scrollWidth > container.clientWidth && currentGap > minGap) {
       currentGap -= 2;
       container.style.gap = currentGap + "px";
     }
 
-    // 2ª Regra: Reduzir a fonte até o mínimo se o gap já estiver no limite
-    if (container.scrollWidth > container.clientWidth) {
-      while (container.scrollWidth > container.clientWidth && currentFontSize > minSize) {
-        currentFontSize -= 1;
-        container.style.fontSize = currentFontSize + "px";
+    // 2ª Regra: Reduzir Fontes individualmente se ainda estiver estourando a tela
+    while (container.scrollWidth > container.clientWidth) {
+      let reducedAny = false;
+
+      if (currentTitleSize > minTitleSize) {
+        currentTitleSize -= 1;
+        reducedAny = true;
       }
+      if (currentValueSize > minValueSize) {
+        currentValueSize -= 1;
+        reducedAny = true;
+      }
+      if (currentVariationSize > minVariationSize) {
+        currentVariationSize -= 1;
+        reducedAny = true;
+      }
+
+      // Atualiza os estilos
+      updateFonts();
+
+      // Se nenhum elemento pôde ser mais reduzido, sai do loop
+      if (!reducedAny) break; 
     }
-    // Se após isso o scrollWidth ainda for maior, o overflow-x: auto cuidará do scroll horizontal.
   }
 });
