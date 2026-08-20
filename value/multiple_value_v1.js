@@ -44,13 +44,14 @@ looker.plugins.visualizations.add({
           position: relative;
           box-sizing: border-box;
         }
+        /* LINHA PONTILHADA MAIS FINA (1px) */
         .metric-card:not(:last-child)::after {
           content: "";
           position: absolute;
           right: 0;
           top: 10%;
           height: 80%;
-          border-right: 2px dotted #cccccc;
+          border-right: 1px dotted #cccccc; 
         }
         .metric-title-container {
           flex-grow: 1;
@@ -79,6 +80,8 @@ looker.plugins.visualizations.add({
           font-weight: bold;
           color: #333333;
           text-align: center;
+          box-sizing: border-box;
+          padding: 0 3px; /* RESPIRO EXTRA DE 3PX DE CADA LADO */
         }
       </style>
       <div class="vis-wrapper">
@@ -88,19 +91,14 @@ looker.plugins.visualizations.add({
     this.container = element.querySelector("#vis-container");
     this.wrapper = element.querySelector(".vis-wrapper");
 
-    // =========================================================
-    // NOVO: Observador para capturar o Zoom do Navegador
-    // =========================================================
     this.lastWidth = 0;
     this.lastHeight = 0;
     this.resizeObserver = new ResizeObserver((entries) => {
       for (let entry of entries) {
         const { width, height } = entry.contentRect;
-        // Evita loop infinito: só recalcula se o tamanho físico REALMENTE mudou
         if (width !== this.lastWidth || height !== this.lastHeight) {
           this.lastWidth = width;
           this.lastHeight = height;
-          // Executa a responsividade usando o requestAnimationFrame para performance
           if (this.currentConfig) {
             window.requestAnimationFrame(() => {
               this.applyResponsiveLayout(this.currentConfig);
@@ -109,14 +107,11 @@ looker.plugins.visualizations.add({
         }
       }
     });
-    // Começa a observar o wrapper principal
     this.resizeObserver.observe(this.wrapper);
   },
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
     this.clearErrors();
-    
-    // NOVO: Salva a configuração atual para o ResizeObserver poder usar ao dar zoom
     this.currentConfig = config; 
 
     if (!data || data.length === 0) {
@@ -235,7 +230,6 @@ looker.plugins.visualizations.add({
     
     let paddingLR = 20; 
 
-    // Remove qualquer barra de rolagem temporária para não atrapalhar o cálculo
     wrapper.style.overflowX = "hidden";
     wrapper.style.overflowY = "hidden";
 
