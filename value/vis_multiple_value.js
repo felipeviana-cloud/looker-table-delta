@@ -23,29 +23,27 @@ looker.plugins.visualizations.add({
         .vis-wrapper {
           font-family: Roboto, "Open Sans", "Noto Sans", "Segoe UI", Arial, sans-serif;
           width: 100%;
-          height: 100%; /* Ocupa todo o espaço útil do tile */
+          height: 100%;
           display: flex;
-          align-items: center; /* Centraliza verticalmente o bloco de métricas no tile */
+          align-items: center;
           justify-content: center;
-          overflow: hidden; /* Evita scroll */
+          overflow: hidden; 
           box-sizing: border-box;
           padding: 5px;
         }
         .metric-container {
           display: flex;
           flex-direction: row;
-          align-items: stretch; /* FORÇA todos os cards a terem a mesma altura */
+          align-items: stretch;
           width: 100%;
         }
         .metric-card {
-          flex: 1 1 0; /* Divide o espaço horizontal em partes iguais */
+          flex: 1 1 0;
           display: flex;
           flex-direction: column;
           position: relative;
           box-sizing: border-box;
         }
-        
-        /* Linha pontilhada padronizada para 80% da altura do card */
         .metric-card:not(:last-child)::after {
           content: "";
           position: absolute;
@@ -54,12 +52,10 @@ looker.plugins.visualizations.add({
           height: 80%;
           border-right: 2px dotted #cccccc;
         }
-
-        /* O CONTAINER DO TÍTULO É O SEGREDO DO ALINHAMENTO */
         .metric-title-container {
-          flex-grow: 1; /* Ocupa todo o espaço livre no topo */
+          flex-grow: 1;
           display: flex;
-          align-items: flex-end; /* Empurra o texto para a base, alinhando todos pela linha de baixo */
+          align-items: flex-end;
           justify-content: center;
           width: 100%;
           margin-bottom: 6px;
@@ -72,15 +68,14 @@ looker.plugins.visualizations.add({
           overflow-wrap: break-word;
           line-height: 1.2;
         }
-
         .metric-variation {
-          white-space: nowrap; /* Não quebra linha */
+          white-space: nowrap;
           font-weight: 600;
           margin-bottom: 2px;
           text-align: center;
         }
         .metric-value {
-          white-space: nowrap; /* Não quebra linha */
+          white-space: nowrap;
           font-weight: bold;
           color: #333333;
           text-align: center;
@@ -92,10 +87,38 @@ looker.plugins.visualizations.add({
     `;
     this.container = element.querySelector("#vis-container");
     this.wrapper = element.querySelector(".vis-wrapper");
+
+    // =========================================================
+    // NOVO: Observador para capturar o Zoom do Navegador
+    // =========================================================
+    this.lastWidth = 0;
+    this.lastHeight = 0;
+    this.resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        // Evita loop infinito: só recalcula se o tamanho físico REALMENTE mudou
+        if (width !== this.lastWidth || height !== this.lastHeight) {
+          this.lastWidth = width;
+          this.lastHeight = height;
+          // Executa a responsividade usando o requestAnimationFrame para performance
+          if (this.currentConfig) {
+            window.requestAnimationFrame(() => {
+              this.applyResponsiveLayout(this.currentConfig);
+            });
+          }
+        }
+      }
+    });
+    // Começa a observar o wrapper principal
+    this.resizeObserver.observe(this.wrapper);
   },
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
     this.clearErrors();
+    
+    // NOVO: Salva a configuração atual para o ResizeObserver poder usar ao dar zoom
+    this.currentConfig = config; 
+
     if (!data || data.length === 0) {
       this.addError({title: "Sem Dados", message: "A query não retornou resultados."});
       return;
@@ -212,6 +235,10 @@ looker.plugins.visualizations.add({
     
     let paddingLR = 20; 
 
+    // Remove qualquer barra de rolagem temporária para não atrapalhar o cálculo
+    wrapper.style.overflowX = "hidden";
+    wrapper.style.overflowY = "hidden";
+
     const updateStyles = () => {
       cards.forEach(c => {
         c.style.paddingLeft = paddingLR + "px";
@@ -232,23 +259,19 @@ looker.plugins.visualizations.add({
       return false;
     };
 
-    // 1º Passo: Força tudo em 1 linha e aplica tamanho máximo
     titles.forEach(t => t.style.whiteSpace = "nowrap");
     updateStyles();
 
-    // 2º Passo: Reduz as distâncias laterais até encostar em 5px
     while (isOverflowing() && paddingLR > 5) {
       paddingLR--;
       updateStyles();
     }
 
-    // 3º Passo: Se bateu em 5px e ainda não coube, QUEBRA A LINHA
     if (isOverflowing()) {
       titles.forEach(t => t.style.whiteSpace = "normal");
       updateStyles(); 
     }
 
-    // 4º Passo: Reduz a fonte gradativamente até o limite
     while (isOverflowing()) {
       let reduced = false;
       
