@@ -2,41 +2,18 @@ looker.plugins.visualizations.add({
   id: "multiple_metric_compare",
   label: "Múltiplas Métricas com Comparação",
   
+  // Apenas as opções que você pediu: Padrão e Mínimo Geral
   options: {
-    valueFontSize: {
+    baseFontSize: {
       section: "Configurações Gerais",
       type: "number",
-      label: "Tamanho Inicial: Valor (px)",
-      default: 32
-    },
-    valueMinFontSize: {
-      section: "Configurações Gerais",
-      type: "number",
-      label: "Tamanho Mínimo: Valor (px)",
-      default: 18
-    },
-    titleFontSize: {
-      section: "Configurações Gerais",
-      type: "number",
-      label: "Tamanho Inicial: Título (px)",
+      label: "Tamanho da Fonte Padrão (Títulos/Variação)",
       default: 14
     },
-    titleMinFontSize: {
+    minFontSize: {
       section: "Configurações Gerais",
       type: "number",
-      label: "Tamanho Mínimo: Título (px)",
-      default: 10
-    },
-    variationFontSize: {
-      section: "Configurações Gerais",
-      type: "number",
-      label: "Tamanho Inicial: Variação (px)",
-      default: 14
-    },
-    variationMinFontSize: {
-      section: "Configurações Gerais",
-      type: "number",
-      label: "Tamanho Mínimo: Variação (px)",
+      label: "Tamanho Mínimo Geral (px)",
       default: 10
     }
   },
@@ -44,74 +21,77 @@ looker.plugins.visualizations.add({
   create: function(element, config) {
     element.innerHTML = `
       <style>
-        .metric-container {
+        .vis-wrapper {
           font-family: Roboto, "Open Sans", "Noto Sans", "Segoe UI", Arial, sans-serif;
-          display: flex;
-          flex-direction: row;
-          justify-content: center;
-          align-items: stretch;
           width: 100%;
           height: 100%;
-          overflow-x: hidden;
-          overflow-y: hidden;
+          display: flex;
+          align-items: center; 
+          justify-content: center;
+          overflow: hidden; /* Evita o scroll ao máximo */
           box-sizing: border-box;
-          padding: 10px;
-          color: #333333;
+          padding: 5px;
+        }
+        .metric-container {
+          display: flex;
+          flex-direction: row;
+          width: 100%;
+          height: 100%;
         }
         .metric-card {
-          position: relative;
+          flex: 1 1 0; /* Divide a tela exatamente em partes iguais */
           display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: flex-end; /* Empurra tudo pro fundo, alinhando os valores mesmo se um título tiver 3 linhas */
-          flex: 1 1 0;
-          min-width: 0; /* REGRA DE OURO: Impede que o card vaze do espaço dele */
+          position: relative;
+          box-sizing: border-box;
+          /* O Padding será controlado no JS, nunca menor que 5px */
         }
         
-        /* LINHA PONTILHADA - Centralizada no Gap */
+        /* A LINHA PONTILHADA AGORA FICA PRESA À BORDA DIREITA */
         .metric-card:not(:last-child)::after {
           content: "";
           position: absolute;
-          /* Se o gap for 10px, a linha fica exatamente a -5px, garantindo 5px de respiro de cada lado */
-          right: calc((var(--current-gap) / -2) - 1px); 
+          right: 0;
           top: 20%;
           height: 60%;
-          border-right: 2px dotted #e0e0e0;
+          border-right: 2px dotted #cccccc;
         }
 
-        .metric-title {
-          width: 100%;
-          flex-grow: 1;
+        .metric-content {
           display: flex;
-          align-items: flex-end;
-          justify-content: center;
-          margin-bottom: 8px;
-          color: #555555;
-          min-width: 0; /* Previne invasão horizontal */
-        }
-        
-        .title-text {
+          flex-direction: column;
+          align-items: center;
+          justify-content: center; /* Centraliza tudo perfeitamente para não cortar o topo */
           width: 100%;
+          height: 100%;
           text-align: center;
+        }
+        .metric-title {
+          color: #555555;
+          margin-bottom: 4px;
+          width: 100%;
           word-break: break-word;
           overflow-wrap: break-word;
-          /* A quebra de linha será controlada pelo JS aqui */
+          line-height: 1.2;
         }
-
         .metric-variation, .metric-value {
-          white-space: nowrap; 
-          margin-top: 4px;
+          white-space: nowrap; /* Valores NUNCA quebram */
+          line-height: 1.2;
         }
         .metric-variation {
           font-weight: 600;
+          margin-bottom: 2px;
         }
         .metric-value {
           font-weight: bold;
+          color: #333333;
         }
       </style>
-      <div id="vis-container" class="metric-container"></div>
+      <div class="vis-wrapper">
+        <div id="vis-container" class="metric-container"></div>
+      </div>
     `;
     this.container = element.querySelector("#vis-container");
+    this.wrapper = element.querySelector(".vis-wrapper");
   },
 
   updateAsync: function(data, element, config, queryResponse, details, done) {
@@ -203,9 +183,11 @@ looker.plugins.visualizations.add({
       let card = document.createElement("div");
       card.className = "metric-card";
       card.innerHTML = `
-        <div class="metric-title"><span class="title-text">${m.label_short || m.label}</span></div>
-        ${variationHTML}
-        <div class="metric-value">${renderedVal}</div>
+        <div class="metric-content">
+          <div class="metric-title">${m.label_short || m.label}</div>
+          ${variationHTML}
+          <div class="metric-value">${renderedVal}</div>
+        </div>
       `;
       this.container.appendChild(card);
     });
@@ -216,70 +198,76 @@ looker.plugins.visualizations.add({
   },
 
   applyResponsiveLayout: function(config) {
+    let wrapper = this.wrapper;
     let container = this.container;
+    let cards = container.querySelectorAll('.metric-card');
+    let contents = container.querySelectorAll('.metric-content');
+    let titles = container.querySelectorAll('.metric-title');
+    let values = container.querySelectorAll('.metric-value');
+    let variations = container.querySelectorAll('.metric-variation');
+
+    let minSize = config.minFontSize || 10;
+    let valSize = 32; // Tamanho base pedido para o valor maior
+    let titleSize = config.baseFontSize || 14;
+    let varSize = config.baseFontSize || 14;
     
-    let minTitleSize = config.titleMinFontSize || 10;
-    let minValueSize = config.valueMinFontSize || 18;
-    let minVariationSize = config.variationMinFontSize || 10;
-    
-    let currentGap = 60; 
-    let currentTitleSize = config.titleFontSize || 14;
-    let currentValueSize = config.valueFontSize || 32;
-    let currentVariationSize = config.variationFontSize || 14;
+    // Começa com folga (20px na esquerda + 20px na direita de cada card = muito espaço)
+    let paddingLR = 20; 
 
-    // Mira especificamente no <span> de texto agora
-    let titles = container.querySelectorAll(".title-text");
-    let values = container.querySelectorAll(".metric-value");
-    let variations = container.querySelectorAll(".metric-variation");
-
-    // Bloqueia a quebra no começo do cálculo
-    titles.forEach(el => el.style.whiteSpace = "nowrap");
-    container.style.overflowX = "hidden";
-
+    // Função que aplica os tamanhos visualmente
     const updateStyles = () => {
-      container.style.gap = currentGap + "px";
-      container.style.setProperty('--current-gap', currentGap + "px");
-      
-      titles.forEach(el => el.style.fontSize = currentTitleSize + "px");
-      values.forEach(el => el.style.fontSize = currentValueSize + "px");
-      variations.forEach(el => el.style.fontSize = currentVariationSize + "px");
+      cards.forEach(c => {
+        c.style.paddingLeft = paddingLR + "px";
+        c.style.paddingRight = paddingLR + "px";
+      });
+      titles.forEach(t => t.style.fontSize = titleSize + "px");
+      variations.forEach(v => v.style.fontSize = varSize + "px");
+      values.forEach(v => v.style.fontSize = valSize + "px");
     };
-    
+
+    // Função ninja que detecta colisão (Horizontal e Vertical)
+    const isOverflowing = () => {
+      if (wrapper.scrollWidth > wrapper.clientWidth) return true;
+      if (wrapper.scrollHeight > wrapper.clientHeight) return true;
+      
+      // Checa se o texto dentro do card está estourando o limite físico do card
+      for (let i = 0; i < contents.length; i++) {
+        if (contents[i].scrollWidth > contents[i].clientWidth) return true;
+        if (contents[i].scrollHeight > cards[i].clientHeight) return true; 
+      }
+      return false;
+    };
+
+    // 1º Passo: Força tudo em 1 linha e aplica tamanho máximo
+    titles.forEach(t => t.style.whiteSpace = "nowrap");
     updateStyles();
 
-    // 1º: Reduz até os 10px permitidos (5px pra cada lado da linha pontilhada)
-    while (container.scrollWidth > container.clientWidth && currentGap > 10) {
-      currentGap -= 2;
+    // 2º Passo: Reduz as distâncias laterais até encostar em 5px (seu limite de segurança)
+    while (isOverflowing() && paddingLR > 5) {
+      paddingLR--;
       updateStyles();
     }
 
-    // 2º: Bateu nos 10px e ainda precisa de espaço? Ativa a quebra de linha no texto
-    if (container.scrollWidth > container.clientWidth) {
-      titles.forEach(el => el.style.whiteSpace = "normal");
+    // 3º Passo: Se bateu em 5px e ainda não coube, QUEBRA A LINHA
+    if (isOverflowing()) {
+      titles.forEach(t => t.style.whiteSpace = "normal");
+      updateStyles(); 
     }
 
-    // 3º: Se quebrar a linha não bastou, reduzimos as fontes gradativamente
-    while (container.scrollWidth > container.clientWidth) {
-      let reducedAny = false;
-
-      if (currentTitleSize > minTitleSize) {
-        currentTitleSize -= 1;
-        reducedAny = true;
-      }
-      if (currentValueSize > minValueSize) {
-        currentValueSize -= 1;
-        reducedAny = true;
-      }
-      if (currentVariationSize > minVariationSize) {
-        currentVariationSize -= 1;
-        reducedAny = true;
-      }
-
+    // 4º Passo: Mesmo quebrando linha o card esticou demais pra baixo ou pros lados? DIMINUI A FONTE
+    while (isOverflowing()) {
+      let reduced = false;
+      
+      if (valSize > minSize) { valSize--; reduced = true; }
+      if (titleSize > minSize) { titleSize--; reduced = true; }
+      if (varSize > minSize) { varSize--; reduced = true; }
+      
       updateStyles();
 
-      // 4º: Esgotou todos os mínimos? Só então ativa o scroll horizontal
-      if (!reducedAny) {
-        container.style.overflowX = "auto";
+      // Se todas as fontes atingiram o tamanho mínimo, para o loop e libera o overflow-x de emergência
+      if (!reduced) {
+        wrapper.style.overflowX = "auto";
+        wrapper.style.overflowY = "auto";
         break; 
       }
     }
