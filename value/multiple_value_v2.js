@@ -3,6 +3,12 @@ looker.plugins.visualizations.add({
   label: "Múltiplas Métricas com Comparação",
   
   options: {
+    maxValueFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Máx: Valor Principal (px)",
+      default: 32
+    },
     baseFontSize: {
       section: "Configurações Gerais",
       type: "number",
@@ -44,7 +50,6 @@ looker.plugins.visualizations.add({
           position: relative;
           box-sizing: border-box;
         }
-        /* LINHA PONTILHADA MAIS FINA (1px) */
         .metric-card:not(:last-child)::after {
           content: "";
           position: absolute;
@@ -53,14 +58,16 @@ looker.plugins.visualizations.add({
           height: 80%;
           border-right: 1px dotted #cccccc; 
         }
+        
         .metric-title-container {
           flex-grow: 1;
           display: flex;
-          align-items: flex-end;
+          align-items: center; /* CENTRALIZA OS TÍTULOS ENTRE SI */
           justify-content: center;
           width: 100%;
           margin-bottom: 6px;
         }
+        
         .metric-title {
           color: #555555;
           width: 100%;
@@ -68,7 +75,14 @@ looker.plugins.visualizations.add({
           word-break: break-word;
           overflow-wrap: break-word;
           line-height: 1.2;
+          
+          /* Propriedades do clamp (2 linhas e reticências) aguardando o JS ativá-las */
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
+        
         .metric-variation {
           white-space: nowrap;
           font-weight: 600;
@@ -81,7 +95,7 @@ looker.plugins.visualizations.add({
           color: #333333;
           text-align: center;
           box-sizing: border-box;
-          padding: 0 3px; /* RESPIRO EXTRA DE 3PX DE CADA LADO */
+          padding: 0 3px; 
         }
       </style>
       <div class="vis-wrapper">
@@ -132,12 +146,15 @@ looker.plugins.visualizations.add({
       metricChoices.push({ [ m.label_short || m.label ]: m.name });
     });
 
-    measures.forEach(m => {
-      let sectionName = `Métrica: ${m.label_short || m.label}`;
+    // M1, M2, M3 nas abas + Nome da métrica na configuração
+    measures.forEach((m, index) => {
+      let sectionName = `M${index + 1}`; // Cria M1, M2...
+      let metricName = m.label_short || m.label;
+
       dynamicOptions[`compare_to_${m.name}`] = {
         section: sectionName,
         type: "string",
-        label: "Comparar com",
+        label: `Métrica Atual: [${metricName}] - Comparar com:`,
         display: "select",
         values: metricChoices,
         default: "none"
@@ -174,6 +191,7 @@ looker.plugins.visualizations.add({
     measures.forEach(m => {
       let val = row[m.name].value;
       let renderedVal = row[m.name].rendered || val;
+      let metricName = m.label_short || m.label;
       
       let compareTo = config[`compare_to_${m.name}`];
       let variationHTML = `<div class="metric-variation" style="visibility: hidden;">-</div>`; 
@@ -200,9 +218,10 @@ looker.plugins.visualizations.add({
 
       let card = document.createElement("div");
       card.className = "metric-card";
+      // title="..." adiciona o hover nativo
       card.innerHTML = `
         <div class="metric-title-container">
-          <div class="metric-title">${m.label_short || m.label}</div>
+          <div class="metric-title" title="${metricName}">${metricName}</div>
         </div>
         ${variationHTML}
         <div class="metric-value">${renderedVal}</div>
@@ -224,7 +243,8 @@ looker.plugins.visualizations.add({
     let variations = container.querySelectorAll('.metric-variation');
 
     let minSize = config.minFontSize || 10;
-    let valSize = 32; 
+    // O valor inicia puxando o Teto configurado por você (ou 32 se estiver vazio)
+    let valSize = config.maxValueFontSize || 32; 
     let titleSize = config.baseFontSize || 14;
     let varSize = config.baseFontSize || 14;
     
@@ -253,7 +273,11 @@ looker.plugins.visualizations.add({
       return false;
     };
 
-    titles.forEach(t => t.style.whiteSpace = "nowrap");
+    // Força 1 linha e desliga o Clamp temporariamente para o cálculo do gap
+    titles.forEach(t => {
+      t.style.whiteSpace = "nowrap";
+      t.style.display = "block"; 
+    });
     updateStyles();
 
     while (isOverflowing() && paddingLR > 5) {
@@ -261,8 +285,12 @@ looker.plugins.visualizations.add({
       updateStyles();
     }
 
+    // Se bateu em 5px e não coube, ativa a quebra de linha e liga o "Clamp" de máx 2 linhas
     if (isOverflowing()) {
-      titles.forEach(t => t.style.whiteSpace = "normal");
+      titles.forEach(t => {
+        t.style.whiteSpace = "normal";
+        t.style.display = "-webkit-box"; // Isso é o que ativa o corte dos ... no CSS
+      });
       updateStyles(); 
     }
 
