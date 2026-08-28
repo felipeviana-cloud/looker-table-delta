@@ -3,11 +3,17 @@ looker.plugins.visualizations.add({
   label: "Múltiplas Métricas com Comparação",
   
   options: {
+    maxValueFontSize: {
+      section: "Configurações Gerais",
+      type: "number",
+      label: "Tamanho Inicial: Valor Principal (px)",
+      default: 32
+    },
     baseFontSize: {
       section: "Configurações Gerais",
       type: "number",
-      label: "Tamanho da Fonte Padrão (px)",
-      default: 16
+      label: "Tamanho da Fonte Padrão (Títulos/Sub) (px)",
+      default: 14
     },
     minFontSize: {
       section: "Configurações Gerais",
@@ -84,7 +90,7 @@ looker.plugins.visualizations.add({
         .metric-main {
           white-space: nowrap;
           font-weight: bold;
-          color: #333333;
+          color: #333333; /* Cor neutra forçada */
           text-align: center;
           box-sizing: border-box;
           padding: 0 3px; 
@@ -236,7 +242,6 @@ looker.plugins.visualizations.add({
         if (diffAbs < 0) color = config[`color_neg_${m.name}`];
       }
 
-      // Função geradora de strings baseada no tipo escolhido
       const getFormattedValue = (type, isMain) => {
         if (type === "val" || !hasComparison) return renderedVal;
         
@@ -248,14 +253,17 @@ looker.plugins.visualizations.add({
         if (type === "abs_pct") text = `${getSign(diffAbs)}${formatNum(diffAbs)} (${getSign(diffPct)}${formatNum(diffPct)}%)`;
         if (type === "abs_pp") text = `${getSign(diffAbs)}${formatNum(diffAbs)} (${getSign(diffPp)}${formatNum(diffPp)} p.p.)`;
 
-        // Se for uma variação (não for 'val'), aplica a cor
+        // Se for o valor principal, ignora a cor e retorna apenas o texto cru
+        if (isMain) {
+          return text;
+        }
+        
+        // Se for a sub-métrica, aplica a tag HTML com a cor calculada
         return `<span style="color: ${color};">${text}</span>`;
       };
 
-      // Montar HTML do Principal
       mainHTML = `<div class="metric-main">${getFormattedValue(mainType, true)}</div>`;
 
-      // Montar HTML do Sub
       if (subType !== "none" && hasComparison) {
         subHTML = `<div class="metric-sub">${getFormattedValue(subType, false)}</div>`;
       }
@@ -285,8 +293,11 @@ looker.plugins.visualizations.add({
     let subs = container.querySelectorAll('.metric-sub');
 
     let minSize = config.minFontSize || 10;
-    // O valor principal agora divide a variável de controle com a fonte padrão
-    let currentFontSize = config.baseFontSize || 16;
+    
+    // Separação das variáveis de tamanho novamente
+    let valSize = config.maxValueFontSize || 32;
+    let titleSubSize = config.baseFontSize || 14;
+    
     let paddingLR = 20; 
 
     wrapper.style.overflowX = "hidden";
@@ -297,10 +308,9 @@ looker.plugins.visualizations.add({
         c.style.paddingLeft = paddingLR + "px";
         c.style.paddingRight = paddingLR + "px";
       });
-      // Todos recebem o mesmo tamanho de fonte agora
-      titles.forEach(t => t.style.fontSize = currentFontSize + "px");
-      subs.forEach(s => s.style.fontSize = currentFontSize + "px");
-      mains.forEach(m => m.style.fontSize = currentFontSize + "px");
+      titles.forEach(t => t.style.fontSize = titleSubSize + "px");
+      subs.forEach(s => s.style.fontSize = titleSubSize + "px");
+      mains.forEach(m => m.style.fontSize = valSize + "px");
     };
 
     const isOverflowing = () => {
@@ -331,11 +341,16 @@ looker.plugins.visualizations.add({
       updateStyles(); 
     }
 
-    while (isOverflowing() && currentFontSize > minSize) {
-      currentFontSize--;
+    while (isOverflowing()) {
+      let reduced = false;
+      
+      // Reduz de forma proporcional até o limite
+      if (valSize > minSize) { valSize--; reduced = true; }
+      if (titleSubSize > minSize) { titleSubSize--; reduced = true; }
+
       updateStyles();
 
-      if (currentFontSize <= minSize && isOverflowing()) {
+      if (!reduced) {
         wrapper.style.overflowX = "auto";
         wrapper.style.overflowY = "auto";
         break; 
