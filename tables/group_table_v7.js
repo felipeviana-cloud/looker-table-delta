@@ -1,5 +1,5 @@
 looker.plugins.visualizations.add({
-  id: "custom_table_grouped_v6",
+  id: "custom_table_grouped_v7",
   label: "Tabela Customizada (Auto Table Calc, Subtotal na Linha)",
 
   options: {
@@ -37,41 +37,28 @@ looker.plugins.visualizations.add({
     const allMeasures = queryResponse.fields.measure_like; 
     const pivots = queryResponse.pivots || [];
 
-    // --- 1. GERAÇÃO DINÂMICA DE OPÇÕES (AGRUPADAS POR MÉTRICA) ---
+    // --- 1. GERAÇÃO DINÂMICA DE OPÇÕES (TUDO NA ABA "SERIES") ---
     let dynamicOptions = { ...this.options };
     
     allMeasures.forEach(m => {
       let safeName = m.name.replace(/\./g, '_');
-      let metricSectionName = m.label_short || m.label; // Cria uma seção exclusiva para esta métrica
+      let mLabel = m.label_short || m.label;
       
-      dynamicOptions[`visible_${safeName}`] = { 
-        section: metricSectionName, type: "boolean", label: `Exibir Métrica`, default: true 
-      };
-      
-      dynamicOptions[`label_${safeName}`] = { 
-        section: metricSectionName, type: "string", label: `Label Customizado`, default: metricSectionName 
-      };
-      
+      // Prefixo para manter as opções da mesma métrica agrupadas juntas na tela Series
+      dynamicOptions[`visible_${safeName}`] = { section: "Series", type: "boolean", label: `[${mLabel}] 1. Exibir`, default: true };
+      dynamicOptions[`label_${safeName}`] = { section: "Series", type: "string", label: `[${mLabel}] 2. Label Customizado`, default: mLabel };
       dynamicOptions[`aggr_${safeName}`] = { 
-        section: metricSectionName, type: "string", display: "select", label: `Subtotal Agregação`, 
-        values: [ {"Soma": "sum"}, {"Média": "average"}, {"Máximo": "max"}, {"Mínimo": "min"}, {"Ocultar Subtotal": "none"} ], 
+        section: "Series", type: "string", display: "select", label: `[${mLabel}] 3. Agregação Subtotal`, 
+        values: [{"Soma": "sum"}, {"Média": "average"}, {"Máximo": "max"}, {"Mínimo": "min"}, {"Ocultar Subtotal": "none"}], 
         default: "sum" 
       };
-
       dynamicOptions[`format_${safeName}`] = { 
-        section: metricSectionName, type: "string", display: "select", label: `Formato`, 
-        values: [
-          {"Default (Looker)": "default"}, 
-          {"Decimais": "decimal"}, 
-          {"Reais (BRL)": "brl"}, 
-          {"U.S. Dollars (USD)": "usd"}, 
-          {"Percentual (%)": "percent"}
-        ], 
+        section: "Series", type: "string", display: "select", label: `[${mLabel}] 4. Formato do Valor`, 
+        values: [{"Default formatting": "default"}, {"Decimals": "decimals"}, {"U.S. Dollars": "usd"}, {"Percent": "percent"}], 
         default: "default" 
       };
-
       dynamicOptions[`decimals_${safeName}`] = { 
-        section: metricSectionName, type: "string", display: "select", label: `Casas Decimais`, 
+        section: "Series", type: "string", display: "select", label: `[${mLabel}] 5. Casas Decimais`, 
         values: [{"0": "0"}, {"1": "1"}, {"2": "2"}, {"3": "3"}, {"4": "4"}], 
         default: "2" 
       };
@@ -82,23 +69,20 @@ looker.plugins.visualizations.add({
     const visibleMeasures = allMeasures.filter(m => config[`visible_${m.name.replace(/\./g, '_')}`] !== false);
 
     // --- FUNÇÃO AUXILIAR DE FORMATAÇÃO ---
-    const formatValue = (value, formatType, decimals) => {
-      if (value === null || value === undefined || isNaN(value)) return '';
-      const dec = parseInt(decimals, 10);
-      
-      switch(formatType) {
-        case 'decimal':
-          return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(value);
-        case 'brl':
-          return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: dec, maximumFractionDigits: dec }).format(value);
-        case 'usd':
-          return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: dec, maximumFractionDigits: dec }).format(value);
-        case 'percent':
-          return new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: dec, maximumFractionDigits: dec }).format(value);
-        default:
-          // Fallback para formatação numérica padrão se não encontrar a do Looker
-          return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(value);
-      }
+    const formatValue = (val, formatType, decimals) => {
+        if (val === null || val === undefined || isNaN(val)) return '';
+        let numDec = parseInt(decimals, 10);
+        
+        if (formatType === 'decimals') {
+            return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: numDec, maximumFractionDigits: numDec }).format(val);
+        } else if (formatType === 'usd') {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: numDec, maximumFractionDigits: numDec }).format(val);
+        } else if (formatType === 'percent') {
+            // Se o dado vier como proporção (0.15 = 15%), o Intl percent lidará com isso nativamente
+            return new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: numDec, maximumFractionDigits: numDec }).format(val);
+        }
+        
+        return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: numDec, maximumFractionDigits: numDec }).format(val);
     };
 
     // --- 2. INTELIGÊNCIA: LER FÓRMULAS DE TABLE CALCULATIONS ---
@@ -163,7 +147,6 @@ looker.plugins.visualizations.add({
       let subtotals = {};
       allMeasures.forEach(m => subtotals[m.name] = {});
 
-      // ACUMULANDO VALORES
       rows.forEach(row => {
         allMeasures.forEach(measure => {
           let pivotKeys = pivots.length > 0 ? pivots.map(p => p.key) : ['no_pivot'];
@@ -197,7 +180,7 @@ looker.plugins.visualizations.add({
            let aggrType = config[`aggr_${safeName}`] || 'sum';
            let formatType = config[`format_${safeName}`] || 'default';
            let decimals = config[`decimals_${safeName}`] || '2';
-           
+
            let calc = subtotals[measure.name][pk];
            let finalVal = 0;
            let showValue = true;
@@ -217,16 +200,13 @@ looker.plugins.visualizations.add({
                    case 'max': finalVal = calc.max || 0; break;
                    case 'min': finalVal = calc.min || 0; break;
                    case 'none': showValue = false; break;
-                   case 'sum':
-                   default: finalVal = calc.sum; break;
+                   case 'sum': default: finalVal = calc.sum; break;
                }
            }
            
            if (!showValue) {
-               html += `<td></td>`;
+               html += `<td></td>`; 
            } else {
-               // Aplica a formatação se não for Ocultar
-               if (formatType === 'default') formatType = 'decimal'; // Subtotal precisa forçar uma visualização
                html += `<td>${formatValue(finalVal, formatType, decimals)}</td>`;
            }
         };
@@ -243,7 +223,6 @@ looker.plugins.visualizations.add({
         html += `</tr>`;
       }
 
-      // Linhas de Dados Reais
       rows.forEach(row => {
         html += `<tr class="group-child-${groupIndex}">`;
         dimensions.forEach(dim => {
@@ -254,14 +233,14 @@ looker.plugins.visualizations.add({
            let safeName = measure.name.replace(/\./g, '_');
            let formatType = config[`format_${safeName}`] || 'default';
            let decimals = config[`decimals_${safeName}`] || '2';
-           
-           let cellData = pivots.length > 0 ? row[measure.name][pk] : row[measure.name];
-           let valRaw = cellData ? cellData.value : null;
-           let valRendered = cellData ? (cellData.rendered || cellData.value) : '';
 
-           // Se o usuário configurou um formato customizado no menu, ele sobrepõe o default do Looker
-           if (formatType !== 'default' && valRaw !== null && !isNaN(valRaw)) {
-              valRendered = formatValue(parseFloat(valRaw), formatType, decimals);
+           let cellData = pivots.length > 0 ? row[measure.name][pk] : row[measure.name];
+           let valRendered = '';
+
+           if (formatType !== 'default' && cellData && cellData.value !== null) {
+               valRendered = formatValue(parseFloat(cellData.value), formatType, decimals);
+           } else {
+               valRendered = cellData ? (cellData.rendered || cellData.value) : '';
            }
 
            html += `<td>${valRendered}</td>`;
@@ -283,7 +262,7 @@ looker.plugins.visualizations.add({
     html += `</tbody></table>`;
     container.innerHTML = html;
 
-    // --- 5. EVENTO DE CLIQUE (ABRIR/FECHAR GRUPOS) ---
+    // --- 5. EVENTO DE CLIQUE (ABRIR/FECHAR GRUPOS INDIVIDUALMENTE) ---
     const groupHeaders = container.querySelectorAll('.group-header');
     groupHeaders.forEach(header => {
       header.addEventListener('click', function() {
