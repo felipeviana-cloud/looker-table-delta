@@ -1,5 +1,5 @@
 looker.plugins.visualizations.add({
-  id: "custom_table_grouped_v7",
+  id: "custom_table_grouped_v8",
   label: "Tabela Customizada (Auto Table Calc, Subtotal na Linha)",
 
   options: {
@@ -37,20 +37,18 @@ looker.plugins.visualizations.add({
     const allMeasures = queryResponse.fields.measure_like; 
     const pivots = queryResponse.pivots || [];
 
-    // --- 1. GERAÇÃO DINÂMICA DE OPÇÕES (TUDO NA ABA "SERIES") ---
     let dynamicOptions = { ...this.options };
     
     allMeasures.forEach(m => {
       let safeName = m.name.replace(/\./g, '_');
       let mLabel = m.label_short || m.label;
       
-      // Prefixo para manter as opções da mesma métrica agrupadas juntas na tela Series
       dynamicOptions[`visible_${safeName}`] = { section: "Series", type: "boolean", label: `[${mLabel}] 1. Exibir`, default: true };
       dynamicOptions[`label_${safeName}`] = { section: "Series", type: "string", label: `[${mLabel}] 2. Label Customizado`, default: mLabel };
       dynamicOptions[`aggr_${safeName}`] = { 
         section: "Series", type: "string", display: "select", label: `[${mLabel}] 3. Agregação Subtotal`, 
-        values: [{"Soma": "sum"}, {"Média": "average"}, {"Máximo": "max"}, {"Mínimo": "min"}, {"Ocultar Subtotal": "none"}], 
-        default: "sum" 
+        values: [{"Automático / Manter Cálculo": "auto"}, {"Soma": "sum"}, {"Média": "average"}, {"Máximo": "max"}, {"Mínimo": "min"}, {"Ocultar Subtotal": "none"}], 
+        default: "auto" 
       };
       dynamicOptions[`format_${safeName}`] = { 
         section: "Series", type: "string", display: "select", label: `[${mLabel}] 4. Formato do Valor`, 
@@ -68,7 +66,6 @@ looker.plugins.visualizations.add({
 
     const visibleMeasures = allMeasures.filter(m => config[`visible_${m.name.replace(/\./g, '_')}`] !== false);
 
-    // --- FUNÇÃO AUXILIAR DE FORMATAÇÃO ---
     const formatValue = (val, formatType, decimals) => {
         if (val === null || val === undefined || isNaN(val)) return '';
         let numDec = parseInt(decimals, 10);
@@ -78,14 +75,12 @@ looker.plugins.visualizations.add({
         } else if (formatType === 'usd') {
             return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: numDec, maximumFractionDigits: numDec }).format(val);
         } else if (formatType === 'percent') {
-            // Se o dado vier como proporção (0.15 = 15%), o Intl percent lidará com isso nativamente
             return new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: numDec, maximumFractionDigits: numDec }).format(val);
         }
         
         return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: numDec, maximumFractionDigits: numDec }).format(val);
     };
 
-    // --- 2. INTELIGÊNCIA: LER FÓRMULAS DE TABLE CALCULATIONS ---
     let ratioCalcs = {};
     if (queryResponse.fields.table_calculations) {
       queryResponse.fields.table_calculations.forEach(tc => {
@@ -96,7 +91,6 @@ looker.plugins.visualizations.add({
       });
     }
 
-    // --- 3. RENDERIZAÇÃO DO CABEÇALHO ---
     let html = `<table class="custom-looker-table">`;
     let headerStyle = `background-color: ${config.headerBgColor || '#f5f5f5'}; color: ${config.headerTextColor || '#333333'};`;
     
@@ -131,7 +125,6 @@ looker.plugins.visualizations.add({
     }
     html += `</tr></thead><tbody>`;
 
-    // --- 4. LÓGICA DE DADOS E SUBTOTAL AUTOMÁTICO ---
     let groupedData = {};
     data.forEach(row => {
       let groupKey = row[dimensions[0].name].value;
@@ -177,7 +170,8 @@ looker.plugins.visualizations.add({
 
         const renderSubtotalCell = (measure, pk) => {
            let safeName = measure.name.replace(/\./g, '_');
-           let aggrType = config[`aggr_${safeName}`] || 'sum';
+           // Default para auto se não configurado
+           let aggrType = config[`aggr_${safeName}`] || 'auto';
            let formatType = config[`format_${safeName}`] || 'default';
            let decimals = config[`decimals_${safeName}`] || '2';
 
@@ -185,16 +179,23 @@ looker.plugins.visualizations.add({
            let finalVal = 0;
            let showValue = true;
 
-           if (ratioCalcs[measure.name]) {
-               let numName = ratioCalcs[measure.name].num;
-               let denName = ratioCalcs[measure.name].den;
-               
-               let sumNum = subtotals[numName] ? subtotals[numName][pk].sum : 0;
-               let sumDen = subtotals[denName] ? subtotals[denName][pk].sum : 0;
-               
-               finalVal = sumDen !== 0 ? (sumNum / sumDen) : 0;
-           } 
-           else {
+           // LOGICA PRINCIPAL DE OVERRIDE:
+           // Se estiver no 'auto', ele respeita os Table Calculations.
+           if (aggrType === 'auto') {
+               if (ratioCalcs[measure.name]) {
+                   let numName = ratioCalcs[measure.name].num;
+                   let denName = ratioCalcs[measure.name].den;
+                   
+                   let sumNum = subtotals[numName] ? subtotals[numName][pk].sum : 0;
+                   let sumDen = subtotals[denName] ? subtotals[denName][pk].sum : 0;
+                   
+                   finalVal = sumDen !== 0 ? (sumNum / sumDen) : 0;
+               } else {
+                   // Fallback para campos normais caso o usuário deixe em "Auto"
+                   finalVal = calc.sum; 
+               }
+           } else {
+               // Se o usuário selecionou QUALQUER OUTRA OPÇÃO, nós forçamos o cálculo matemático escolhido, ignorando a lógica do Table Calc.
                switch(aggrType) {
                    case 'average': finalVal = calc.count > 0 ? calc.sum / calc.count : 0; break;
                    case 'max': finalVal = calc.max || 0; break;
@@ -262,7 +263,6 @@ looker.plugins.visualizations.add({
     html += `</tbody></table>`;
     container.innerHTML = html;
 
-    // --- 5. EVENTO DE CLIQUE (ABRIR/FECHAR GRUPOS INDIVIDUALMENTE) ---
     const groupHeaders = container.querySelectorAll('.group-header');
     groupHeaders.forEach(header => {
       header.addEventListener('click', function() {
