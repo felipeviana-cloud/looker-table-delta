@@ -1,5 +1,5 @@
 looker.plugins.visualizations.add({
-  id: "custom_table_grouped_v4",
+  id: "custom_table_grouped_v5",
   label: "Tabela Customizada (Auto Table Calc, Subtotal na Linha)",
 
   options: {
@@ -34,16 +34,32 @@ looker.plugins.visualizations.add({
     }
 
     const dimensions = queryResponse.fields.dimension_like;
-    const allMeasures = queryResponse.fields.measure_like; // Inclui métricas e table calculations
+    const allMeasures = queryResponse.fields.measure_like; 
     const pivots = queryResponse.pivots || [];
 
-    // --- 1. GERAÇÃO DINÂMICA DE OPÇÕES ---
+    // --- 1. GERAÇÃO DINÂMICA DE OPÇÕES (AGORA COM ESCOLHA DE AGREGAÇÃO) ---
     let dynamicOptions = { ...this.options };
     
     allMeasures.forEach(m => {
       let safeName = m.name.replace(/\./g, '_');
       dynamicOptions[`label_${safeName}`] = { section: "Series", type: "string", label: `Label: ${m.label_short || m.label}`, default: m.label_short || m.label };
       dynamicOptions[`visible_${safeName}`] = { section: "Series", type: "boolean", label: `Exibir: ${m.label_short || m.label}`, default: true };
+      
+      // NOVA OPÇÃO: Escolher o tipo de agregação do subtotal para cada campo
+      dynamicOptions[`aggr_${safeName}`] = { 
+        section: "Series", 
+        type: "string", 
+        display: "select", 
+        label: `Subtotal Agregação: ${m.label_short || m.label}`, 
+        values: [
+          {"Soma": "sum"}, 
+          {"Média": "average"}, 
+          {"Máximo": "max"}, 
+          {"Mínimo": "min"}, 
+          {"Ocultar Subtotal": "none"}
+        ], 
+        default: "sum" 
+      };
     });
 
     this.trigger('registerOptions', dynamicOptions);
@@ -54,7 +70,6 @@ looker.plugins.visualizations.add({
     let ratioCalcs = {};
     if (queryResponse.fields.table_calculations) {
       queryResponse.fields.table_calculations.forEach(tc => {
-        // Expressão Regular para encontrar divisões do tipo: ${campo_a} / ${campo_b}
         let match = tc.expression.match(/\$\{([^}]+)\}\s*\/\s*\$\{([^}]+)\}/);
         if (match) {
           ratioCalcs[tc.name] = { num: match[1], den: match[2] };
@@ -110,10 +125,10 @@ looker.plugins.visualizations.add({
     for (const [groupName, rows] of Object.entries(groupedData)) {
       groupIndex++;
       
-      // Acumula valores de TODAS as métricas (mesmo as ocultas, pois precisamos delas pro cálculo)
       let subtotals = {};
       allMeasures.forEach(m => subtotals[m.name] = {});
 
+      // ACUMULANDO VALORES (Agora calculamos Max e Min também)
       rows.forEach(row => {
         allMeasures.forEach(measure => {
           let pivotKeys = pivots.length > 0 ? pivots.map(p => p.key) : ['no_pivot'];
@@ -121,9 +136,19 @@ looker.plugins.visualizations.add({
             let cellData = pivots.length > 0 ? row[measure.name][pk] : row[measure.name];
             let val = cellData && cellData.value !== null ? parseFloat(cellData.value) : 0;
             
-            if (!subtotals[measure.name][pk]) subtotals[measure.name][pk] = { sum: 0, count: 0 };
+            if (!subtotals[measure.name][pk]) {
+               subtotals[measure.name][pk] = { sum: 0, count: 0, min: null, max: null };
+            }
+            
             subtotals[measure.name][pk].sum += val;
             subtotals[measure.name][pk].count += 1;
+            
+            if (subtotals[measure.name][pk].min === null || val < subtotals[measure.name][pk].min) {
+               subtotals[measure.name][pk].min = val;
+            }
+            if (subtotals[measure.name][pk].max === null || val > subtotals[measure.name][pk].max) {
+               subtotals[measure.name][pk].max = val;
+            }
           });
         });
       });
@@ -133,10 +158,13 @@ looker.plugins.visualizations.add({
         html += `<td class="group-title" colspan="${dimensions.length}"><span class="toggle-icon">▼</span> ${groupName}</td>`;
 
         const renderSubtotalCell = (measure, pk) => {
+           let safeName = measure.name.replace(/\./g, '_');
+           let aggrType = config[`aggr_${safeName}`] || 'sum'; // Pega a escolha do usuário
            let calc = subtotals[measure.name][pk];
            let finalVal = 0;
+           let showValue = true;
 
-           // MÁGICA: Se o JS detectou que é um Table Calculation de divisão
+           // Regra 1: Table Calculations (Divisão como o CAC mantêm a regra matemática forte)
            if (ratioCalcs[measure.name]) {
                let numName = ratioCalcs[measure.name].num;
                let denName = ratioCalcs[measure.name].den;
@@ -146,15 +174,28 @@ looker.plugins.visualizations.add({
                
                finalVal = sumDen !== 0 ? (sumNum / sumDen) : 0;
            } 
-           else if (measure.type === 'average') {
-               finalVal = calc.count > 0 ? calc.sum / calc.count : 0;
-           } else {
-               finalVal = calc.sum; // Para count e sum
+           // Regra 2: Aplica o que o usuário escolheu no painel para as métricas normais
+           else {
+               switch(aggrType) {
+                   case 'average': 
+                       finalVal = calc.count > 0 ? calc.sum / calc.count : 0; break;
+                   case 'max': 
+                       finalVal = calc.max || 0; break;
+                   case 'min': 
+                       finalVal = calc.min || 0; break;
+                   case 'none': 
+                       showValue = false; break; // Oculta o subtotal se o usuário pedir
+                   case 'sum':
+                   default: 
+                       finalVal = calc.sum; break;
+               }
            }
            
-           // Formata como Moeda (R$) ou Decimal dependendo do valor
-           let isCurrency = measure.value_format_name && measure.value_format_name.includes('usd') ? 'currency' : 'decimal';
-           html += `<td>${new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(finalVal)}</td>`;
+           if (!showValue) {
+               html += `<td></td>`; // Célula vazia para "Ocultar"
+           } else {
+               html += `<td>${new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(finalVal)}</td>`;
+           }
         };
 
         if (pivots.length > 0) {
