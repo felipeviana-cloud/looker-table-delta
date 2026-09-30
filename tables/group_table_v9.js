@@ -1,5 +1,5 @@
 looker.plugins.visualizations.add({
-  id: "custom_table_grouped_v8",
+  id: "custom_table_grouped_v9",
   label: "Tabela Customizada (Auto Table Calc, Subtotal na Linha)",
 
   options: {
@@ -19,6 +19,9 @@ looker.plugins.visualizations.add({
         .group-header td.group-title { text-align: left; }
         .group-header:hover td { background-color: #e0e0e0; }
         .toggle-icon { display: inline-block; width: 15px; font-size: 10px; }
+        /* ESTILO DA LINHA DE TOTAIS */
+        .total-row td { background-color: #cccccc !important; color: #000; font-weight: bold; border-top: 2px solid #888; }
+        .total-title { text-align: left !important; }
       </style>
       <div id="table-container"></div>
     `;
@@ -170,7 +173,6 @@ looker.plugins.visualizations.add({
 
         const renderSubtotalCell = (measure, pk) => {
            let safeName = measure.name.replace(/\./g, '_');
-           // Default para auto se não configurado
            let aggrType = config[`aggr_${safeName}`] || 'auto';
            let formatType = config[`format_${safeName}`] || 'default';
            let decimals = config[`decimals_${safeName}`] || '2';
@@ -179,8 +181,6 @@ looker.plugins.visualizations.add({
            let finalVal = 0;
            let showValue = true;
 
-           // LOGICA PRINCIPAL DE OVERRIDE:
-           // Se estiver no 'auto', ele respeita os Table Calculations.
            if (aggrType === 'auto') {
                if (ratioCalcs[measure.name]) {
                    let numName = ratioCalcs[measure.name].num;
@@ -191,11 +191,9 @@ looker.plugins.visualizations.add({
                    
                    finalVal = sumDen !== 0 ? (sumNum / sumDen) : 0;
                } else {
-                   // Fallback para campos normais caso o usuário deixe em "Auto"
                    finalVal = calc.sum; 
                }
            } else {
-               // Se o usuário selecionou QUALQUER OUTRA OPÇÃO, nós forçamos o cálculo matemático escolhido, ignorando a lógica do Table Calc.
                switch(aggrType) {
                    case 'average': finalVal = calc.count > 0 ? calc.sum / calc.count : 0; break;
                    case 'max': finalVal = calc.max || 0; break;
@@ -260,7 +258,42 @@ looker.plugins.visualizations.add({
       });
     }
 
-    html += `</tbody></table>`;
+    html += `</tbody>`;
+
+    if (queryResponse.totals_data) {
+        html += `<tfoot><tr class="total-row">`;
+        html += `<td class="total-title" colspan="${dimensions.length}">Totais</td>`;
+
+        const renderTotalCell = (measure, pk) => {
+           let safeName = measure.name.replace(/\./g, '_');
+           let formatType = config[`format_${safeName}`] || 'default';
+           let decimals = config[`decimals_${safeName}`] || '2';
+
+           let cellData = pivots.length > 0 ? queryResponse.totals_data[measure.name][pk] : queryResponse.totals_data[measure.name];
+           let valRendered = '';
+
+           if (formatType !== 'default' && cellData && cellData.value !== null) {
+               valRendered = formatValue(parseFloat(cellData.value), formatType, decimals);
+           } else {
+               valRendered = cellData ? (cellData.rendered || cellData.value) : '';
+           }
+
+           html += `<td>${valRendered}</td>`;
+        };
+
+        if (pivots.length > 0) {
+          if (config.headerOrder === "measure_first") {
+            visibleMeasures.forEach(measure => pivots.forEach(pivot => renderTotalCell(measure, pivot.key)));
+          } else {
+            pivots.forEach(pivot => visibleMeasures.forEach(measure => renderTotalCell(measure, pivot.key)));
+          }
+        } else {
+          visibleMeasures.forEach(measure => renderTotalCell(measure, 'no_pivot'));
+        }
+        html += `</tr></tfoot>`;
+    }
+
+    html += `</table>`;
     container.innerHTML = html;
 
     const groupHeaders = container.querySelectorAll('.group-header');
