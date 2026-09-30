@@ -1,0 +1,217 @@
+looker.plugins.visualizations.add({
+  id: "custom_table_grouped_v4",
+  label: "Tabela Customizada (Auto Table Calc, Subtotal na Linha)",
+
+  options: {
+    headerOrder: { section: "Plot", type: "string", display: "select", label: "Ordem do Cabeçalho", values: [{"Métrica > Pivot": "measure_first"}, {"Pivot > Métrica": "pivot_first"}], default: "measure_first" },
+    enableRowGroups: { section: "Grouping", type: "boolean", label: "Ativar Agrupamento de Linhas", default: true },
+    headerBgColor: { section: "Formatting", type: "string", display: "color", label: "Cor de Fundo do Cabeçalho", default: "#f5f5f5" },
+    headerTextColor: { section: "Formatting", type: "string", display: "color", label: "Cor do Texto do Cabeçalho", default: "#333333" }
+  },
+
+  create: function(element, config) {
+    element.innerHTML = `
+      <style>
+        .custom-looker-table { width: 100%; border-collapse: collapse; font-family: Roboto, sans-serif; font-size: 12px; }
+        .custom-looker-table th, .custom-looker-table td { border: 1px solid #ddd; padding: 8px; text-align: right; }
+        .custom-looker-table th { text-align: center; font-weight: bold; }
+        .group-header td { background-color: #ececec; font-weight: bold; cursor: pointer; user-select: none; }
+        .group-header td.group-title { text-align: left; }
+        .group-header:hover td { background-color: #e0e0e0; }
+        .toggle-icon { display: inline-block; width: 15px; font-size: 10px; }
+      </style>
+      <div id="table-container"></div>
+    `;
+  },
+
+  updateAsync: function(data, element, config, queryResponse, details, done) {
+    this.clearErrors();
+    const container = element.querySelector('#table-container');
+
+    if (queryResponse.fields.dimensions.length === 0) {
+      this.addError({ title: "Sem Dimensões", message: "Esta tabela requer pelo menos uma dimensão." });
+      return done();
+    }
+
+    const dimensions = queryResponse.fields.dimension_like;
+    const allMeasures = queryResponse.fields.measure_like; // Inclui métricas e table calculations
+    const pivots = queryResponse.pivots || [];
+
+    // --- 1. GERAÇÃO DINÂMICA DE OPÇÕES ---
+    let dynamicOptions = { ...this.options };
+    
+    allMeasures.forEach(m => {
+      let safeName = m.name.replace(/\./g, '_');
+      dynamicOptions[`label_${safeName}`] = { section: "Series", type: "string", label: `Label: ${m.label_short || m.label}`, default: m.label_short || m.label };
+      dynamicOptions[`visible_${safeName}`] = { section: "Series", type: "boolean", label: `Exibir: ${m.label_short || m.label}`, default: true };
+    });
+
+    this.trigger('registerOptions', dynamicOptions);
+
+    const visibleMeasures = allMeasures.filter(m => config[`visible_${m.name.replace(/\./g, '_')}`] !== false);
+
+    // --- 2. INTELIGÊNCIA: LER FÓRMULAS DE TABLE CALCULATIONS ---
+    let ratioCalcs = {};
+    if (queryResponse.fields.table_calculations) {
+      queryResponse.fields.table_calculations.forEach(tc => {
+        // Expressão Regular para encontrar divisões do tipo: ${campo_a} / ${campo_b}
+        let match = tc.expression.match(/\$\{([^}]+)\}\s*\/\s*\$\{([^}]+)\}/);
+        if (match) {
+          ratioCalcs[tc.name] = { num: match[1], den: match[2] };
+        }
+      });
+    }
+
+    // --- 3. RENDERIZAÇÃO DO CABEÇALHO ---
+    let html = `<table class="custom-looker-table">`;
+    let headerStyle = `background-color: ${config.headerBgColor || '#f5f5f5'}; color: ${config.headerTextColor || '#333333'};`;
+    
+    html += `<thead><tr>`;
+    dimensions.forEach(dim => {
+      html += `<th style="${headerStyle}" rowspan="${pivots.length > 0 ? 2 : 1}">${dim.label_short || dim.label}</th>`;
+    });
+
+    if (pivots.length > 0) {
+      if (config.headerOrder === "measure_first") {
+        visibleMeasures.forEach(measure => {
+          let customLabel = config[`label_${measure.name.replace(/\./g, '_')}`] || measure.label_short || measure.label;
+          html += `<th style="${headerStyle}" colspan="${pivots.length}">${customLabel}</th>`;
+        });
+        html += `</tr><tr>`;
+        visibleMeasures.forEach(measure => pivots.forEach(pivot => html += `<th style="${headerStyle}">${pivot.key}</th>`));
+      } else {
+        pivots.forEach(pivot => html += `<th style="${headerStyle}" colspan="${visibleMeasures.length}">${pivot.key}</th>`);
+        html += `</tr><tr>`;
+        pivots.forEach(pivot => {
+          visibleMeasures.forEach(measure => {
+            let customLabel = config[`label_${measure.name.replace(/\./g, '_')}`] || measure.label_short || measure.label;
+            html += `<th style="${headerStyle}">${customLabel}</th>`;
+          });
+        });
+      }
+    } else {
+      visibleMeasures.forEach(measure => {
+        let customLabel = config[`label_${measure.name.replace(/\./g, '_')}`] || measure.label_short || measure.label;
+        html += `<th style="${headerStyle}">${customLabel}</th>`;
+      });
+    }
+    html += `</tr></thead><tbody>`;
+
+    // --- 4. LÓGICA DE DADOS E SUBTOTAL AUTOMÁTICO ---
+    let groupedData = {};
+    data.forEach(row => {
+      let groupKey = row[dimensions[0].name].value;
+      if (!groupedData[groupKey]) groupedData[groupKey] = [];
+      groupedData[groupKey].push(row);
+    });
+
+    let groupIndex = 0;
+
+    for (const [groupName, rows] of Object.entries(groupedData)) {
+      groupIndex++;
+      
+      // Acumula valores de TODAS as métricas (mesmo as ocultas, pois precisamos delas pro cálculo)
+      let subtotals = {};
+      allMeasures.forEach(m => subtotals[m.name] = {});
+
+      rows.forEach(row => {
+        allMeasures.forEach(measure => {
+          let pivotKeys = pivots.length > 0 ? pivots.map(p => p.key) : ['no_pivot'];
+          pivotKeys.forEach(pk => {
+            let cellData = pivots.length > 0 ? row[measure.name][pk] : row[measure.name];
+            let val = cellData && cellData.value !== null ? parseFloat(cellData.value) : 0;
+            
+            if (!subtotals[measure.name][pk]) subtotals[measure.name][pk] = { sum: 0, count: 0 };
+            subtotals[measure.name][pk].sum += val;
+            subtotals[measure.name][pk].count += 1;
+          });
+        });
+      });
+
+      if (config.enableRowGroups) {
+        html += `<tr class="group-header" data-group="${groupIndex}">`;
+        html += `<td class="group-title" colspan="${dimensions.length}"><span class="toggle-icon">▼</span> ${groupName}</td>`;
+
+        const renderSubtotalCell = (measure, pk) => {
+           let calc = subtotals[measure.name][pk];
+           let finalVal = 0;
+
+           // MÁGICA: Se o JS detectou que é um Table Calculation de divisão
+           if (ratioCalcs[measure.name]) {
+               let numName = ratioCalcs[measure.name].num;
+               let denName = ratioCalcs[measure.name].den;
+               
+               let sumNum = subtotals[numName] ? subtotals[numName][pk].sum : 0;
+               let sumDen = subtotals[denName] ? subtotals[denName][pk].sum : 0;
+               
+               finalVal = sumDen !== 0 ? (sumNum / sumDen) : 0;
+           } 
+           else if (measure.type === 'average') {
+               finalVal = calc.count > 0 ? calc.sum / calc.count : 0;
+           } else {
+               finalVal = calc.sum; // Para count e sum
+           }
+           
+           // Formata como Moeda (R$) ou Decimal dependendo do valor
+           let isCurrency = measure.value_format_name && measure.value_format_name.includes('usd') ? 'currency' : 'decimal';
+           html += `<td>${new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(finalVal)}</td>`;
+        };
+
+        if (pivots.length > 0) {
+          if (config.headerOrder === "measure_first") {
+            visibleMeasures.forEach(measure => pivots.forEach(pivot => renderSubtotalCell(measure, pivot.key)));
+          } else {
+            pivots.forEach(pivot => visibleMeasures.forEach(measure => renderSubtotalCell(measure, pivot.key)));
+          }
+        } else {
+          visibleMeasures.forEach(measure => renderSubtotalCell(measure, 'no_pivot'));
+        }
+        html += `</tr>`;
+      }
+
+      // Linhas de Dados Reais
+      rows.forEach(row => {
+        html += `<tr class="group-child-${groupIndex}">`;
+        dimensions.forEach(dim => {
+          html += `<td>${row[dim.name].rendered || row[dim.name].value}</td>`;
+        });
+
+        const renderDataCell = (measure, pk) => {
+           let cellData = pivots.length > 0 ? row[measure.name][pk] : row[measure.name];
+           let valRendered = cellData ? (cellData.rendered || cellData.value) : '';
+           html += `<td>${valRendered}</td>`;
+        };
+
+        if (pivots.length > 0) {
+          if (config.headerOrder === "measure_first") {
+            visibleMeasures.forEach(measure => pivots.forEach(pivot => renderDataCell(measure, pivot.key)));
+          } else {
+            pivots.forEach(pivot => visibleMeasures.forEach(measure => renderDataCell(measure, pivot.key)));
+          }
+        } else {
+          visibleMeasures.forEach(measure => renderDataCell(measure, 'no_pivot'));
+        }
+        html += `</tr>`;
+      });
+    }
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+
+    // --- 5. EVENTO DE CLIQUE (ABRIR/FECHAR GRUPOS INDIVIDUALMENTE) ---
+    const groupHeaders = container.querySelectorAll('.group-header');
+    groupHeaders.forEach(header => {
+      header.addEventListener('click', function() {
+        const groupId = this.getAttribute('data-group');
+        const children = container.querySelectorAll('.group-child-' + groupId);
+        const icon = this.querySelector('.toggle-icon');
+        let isCollapsed = children[0].style.display === 'none';
+        
+        children.forEach(child => child.style.display = isCollapsed ? '' : 'none');
+        icon.innerHTML = isCollapsed ? '▼' : '▶';
+      });
+    });
+
+    done();
+  }
+});
