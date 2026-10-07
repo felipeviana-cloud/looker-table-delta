@@ -149,12 +149,13 @@ looker.plugins.visualizations.add({
       let sectionName = `M${index + 1}`; 
       let originalName = m.label_short || m.label;
 
+      // NOVA OPÇÃO: Ordem de exibição
       dynamicOptions[`order_${m.name}`] = {
         section: sectionName,
         type: "number",
         label: `Ordem de Exibição (1, 2, 3...)`,
         default: index + 1,
-        order: 1
+        order: 1 // Força a aparecer no topo da seção
       };
       
       dynamicOptions[`custom_label_${m.name}`] = {
@@ -219,24 +220,6 @@ looker.plugins.visualizations.add({
         default: "#E66981",
         order: 7
       };
-      
-      // NOVAS OPÇÕES: Lógica condicional de ocultar
-      dynamicOptions[`hide_if_metric_${m.name}`] = {
-        section: sectionName,
-        type: "string",
-        label: "Ocultar esta métrica se:",
-        display: "select",
-        values: metricChoices,
-        default: "none",
-        order: 8
-      };
-      dynamicOptions[`hide_if_value_${m.name}`] = {
-        section: sectionName,
-        type: "string",
-        label: "For igual a (ex: Aguardando, NaN, nulo):",
-        default: "",
-        order: 9
-      };
     });
 
     this.trigger('registerOptions', dynamicOptions);
@@ -247,42 +230,27 @@ looker.plugins.visualizations.add({
     const formatNum = (num) => num.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
     const getSign = (num) => num > 0 ? "+" : "";
 
+    // ORDENA AS MÉTRICAS COM BASE NO INPUT DO USUÁRIO
     let sortedMeasures = [...measures].sort((a, b) => {
       let orderA = config[`order_${a.name}`];
       let orderB = config[`order_${b.name}`];
       
+      // Se ainda não tiver configuração salva, usa a posição original (index + 1)
       if (orderA === undefined) orderA = measures.indexOf(a) + 1;
       if (orderB === undefined) orderB = measures.indexOf(b) + 1;
       
       return orderA - orderB;
     });
 
+    // Renderiza as métricas obedecendo a nova ordem (sortedMeasures ao invés de measures)
     sortedMeasures.forEach(m => {
-      // --- LÓGICA NOVA: VERIFICA SE DEVE OCULTAR ESTE CARD ---
-      let hideIfMetric = config[`hide_if_metric_${m.name}`];
-      let hideIfValue = config[`hide_if_value_${m.name}`];
-      
-      if (hideIfMetric && hideIfMetric !== "none" && hideIfValue && hideIfValue.trim() !== "") {
-        let triggerData = row[hideIfMetric];
-        if (triggerData) {
-          let tVal = triggerData.value;
-          let tRend = triggerData.rendered || tVal;
-          let valToCompare = hideIfValue.trim();
-          
-          // Suporta verificação literal, NaN ou nulo
-          let isNaNCheck = valToCompare.toLowerCase() === "nan" && typeof tVal !== "string" && Number.isNaN(Number(tVal));
-          let isNullCheck = (valToCompare.toLowerCase() === "nulo" || valToCompare.toLowerCase() === "null") && (tVal === null || tVal === undefined);
-          let isStringMatch = String(tVal) === valToCompare || String(tRend) === valToCompare;
-
-          if (isNaNCheck || isNullCheck || isStringMatch) {
-            return; // Se bater com a condição, sai do loop e NÃO renderiza este bloco
-          }
-        }
-      }
-      // -------------------------------------------------------
-
       let val = row[m.name].value;
-      let renderedVal = row[m.name].rendered || val; // Restaurado a sua lógica original
+      let renderedVal = row[m.name].rendered || val;
+      
+      // REGRA NOVA: Verifica se na exibição ou no valor bruto tem "NaN". Se tiver, pula a criação deste card.
+      if (Number.isNaN(val) || String(val) === "NaN" || String(renderedVal).includes("NaN")) {
+        return; // Sai desta iteração do loop
+      }
       
       let customLabel = config[`custom_label_${m.name}`];
       let displayLabel = (customLabel && customLabel.trim() !== "") ? customLabel : (m.label_short || m.label);
@@ -301,8 +269,13 @@ looker.plugins.visualizations.add({
       if (hasComparison) {
         let compVal = row[compareTo].value;
         
+        // 1. Inverte a subtração para o valor absoluto
         diffAbs = compVal - val;
+        
+        // 2. Inverte o divisor da porcentagem (para que o cálculo do % seja sobre a base correta)
         diffPct = val !== 0 ? ((diffAbs) / Math.abs(val)) * 100 : 0;
+        
+        // 3. Inverte a subtração dos pontos percentuais
         diffPp = (compVal - val) * 100;
 
         if (diffAbs > 0) color = config[`color_pos_${m.name}`];
@@ -320,10 +293,12 @@ looker.plugins.visualizations.add({
         if (type === "abs_pct") text = `${getSign(diffAbs)}${formatNum(diffAbs)} (${getSign(diffPct)}${formatNum(diffPct)}%)`;
         if (type === "abs_pp") text = `${getSign(diffAbs)}${formatNum(diffAbs)} (${getSign(diffPp)}${formatNum(diffPp)} p.p.)`;
 
+        // Se for o valor principal, ignora a cor e retorna apenas o texto cru
         if (isMain) {
           return text;
         }
         
+        // Se for a sub-métrica, aplica a tag HTML com a cor calculada
         return `<span style="color: ${color};">${text}</span>`;
       };
 
@@ -359,6 +334,7 @@ looker.plugins.visualizations.add({
 
     let minSize = config.minFontSize || 10;
     
+    // Separação das variáveis de tamanho novamente
     let valSize = config.maxValueFontSize || 32;
     let titleSubSize = config.baseFontSize || 14;
     
@@ -408,6 +384,7 @@ looker.plugins.visualizations.add({
     while (isOverflowing()) {
       let reduced = false;
       
+      // Reduz de forma proporcional até o limite
       if (valSize > minSize) { valSize--; reduced = true; }
       if (titleSubSize > minSize) { titleSubSize--; reduced = true; }
 
