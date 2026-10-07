@@ -219,6 +219,24 @@ looker.plugins.visualizations.add({
         default: "#E66981",
         order: 7
       };
+      
+      // NOVAS OPÇÕES: Lógica condicional de ocultar
+      dynamicOptions[`hide_if_metric_${m.name}`] = {
+        section: sectionName,
+        type: "string",
+        label: "Ocultar esta métrica se:",
+        display: "select",
+        values: metricChoices,
+        default: "none",
+        order: 8
+      };
+      dynamicOptions[`hide_if_value_${m.name}`] = {
+        section: sectionName,
+        type: "string",
+        label: "For igual a (ex: Aguardando, NaN, nulo):",
+        default: "",
+        order: 9
+      };
     });
 
     this.trigger('registerOptions', dynamicOptions);
@@ -229,7 +247,6 @@ looker.plugins.visualizations.add({
     const formatNum = (num) => num.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
     const getSign = (num) => num > 0 ? "+" : "";
 
-    // ORDENA AS MÉTRICAS COM BASE NO INPUT DO USUÁRIO
     let sortedMeasures = [...measures].sort((a, b) => {
       let orderA = config[`order_${a.name}`];
       let orderB = config[`order_${b.name}`];
@@ -240,15 +257,32 @@ looker.plugins.visualizations.add({
       return orderA - orderB;
     });
 
-    // Renderiza as métricas obedecendo a nova ordem
     sortedMeasures.forEach(m => {
+      // --- LÓGICA NOVA: VERIFICA SE DEVE OCULTAR ESTE CARD ---
+      let hideIfMetric = config[`hide_if_metric_${m.name}`];
+      let hideIfValue = config[`hide_if_value_${m.name}`];
+      
+      if (hideIfMetric && hideIfMetric !== "none" && hideIfValue && hideIfValue.trim() !== "") {
+        let triggerData = row[hideIfMetric];
+        if (triggerData) {
+          let tVal = triggerData.value;
+          let tRend = triggerData.rendered || tVal;
+          let valToCompare = hideIfValue.trim();
+          
+          // Suporta verificação literal, NaN ou nulo
+          let isNaNCheck = valToCompare.toLowerCase() === "nan" && typeof tVal !== "string" && Number.isNaN(Number(tVal));
+          let isNullCheck = (valToCompare.toLowerCase() === "nulo" || valToCompare.toLowerCase() === "null") && (tVal === null || tVal === undefined);
+          let isStringMatch = String(tVal) === valToCompare || String(tRend) === valToCompare;
+
+          if (isNaNCheck || isNullCheck || isStringMatch) {
+            return; // Se bater com a condição, sai do loop e NÃO renderiza este bloco
+          }
+        }
+      }
+      // -------------------------------------------------------
+
       let val = row[m.name].value;
-      
-      // VALIDAÇÃO NOVA: Verifica se o valor base é nulo, indefinido ou NaN
-      let isValInvalid = val === null || val === undefined || Number.isNaN(Number(val));
-      
-      // Se for inválido, exibe "-" (traço) ou "" (vazio). Senão, renderiza o valor normal.
-      let renderedVal = isValInvalid ? "-" : (row[m.name].rendered || val);
+      let renderedVal = row[m.name].rendered || val; // Restaurado a sua lógica original
       
       let customLabel = config[`custom_label_${m.name}`];
       let displayLabel = (customLabel && customLabel.trim() !== "") ? customLabel : (m.label_short || m.label);
@@ -267,25 +301,12 @@ looker.plugins.visualizations.add({
       if (hasComparison) {
         let compVal = row[compareTo].value;
         
-        // VALIDAÇÃO NOVA: Verifica se o valor de comparação também é inválido
-        let isCompInvalid = compVal === null || compVal === undefined || Number.isNaN(Number(compVal));
-        
-        // Se algum dos dois valores for inválido, a comparação é cancelada
-        if (isValInvalid || isCompInvalid) {
-          hasComparison = false;
-        } else {
-          // 1. Inverte a subtração para o valor absoluto
-          diffAbs = compVal - val;
-          
-          // 2. Inverte o divisor da porcentagem
-          diffPct = val !== 0 ? ((diffAbs) / Math.abs(val)) * 100 : 0;
-          
-          // 3. Inverte a subtração dos pontos percentuais
-          diffPp = (compVal - val) * 100;
+        diffAbs = compVal - val;
+        diffPct = val !== 0 ? ((diffAbs) / Math.abs(val)) * 100 : 0;
+        diffPp = (compVal - val) * 100;
 
-          if (diffAbs > 0) color = config[`color_pos_${m.name}`];
-          if (diffAbs < 0) color = config[`color_neg_${m.name}`];
-        }
+        if (diffAbs > 0) color = config[`color_pos_${m.name}`];
+        if (diffAbs < 0) color = config[`color_neg_${m.name}`];
       }
 
       const getFormattedValue = (type, isMain) => {
