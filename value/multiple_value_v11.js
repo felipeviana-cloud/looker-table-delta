@@ -144,18 +144,16 @@ looker.plugins.visualizations.add({
       metricChoices.push({ [ m.label_short || m.label ]: m.name });
     });
 
-    // Criação das opções no painel de formatação
     measures.forEach((m, index) => {
       let sectionName = `M${index + 1}`; 
       let originalName = m.label_short || m.label;
 
-      // NOVA OPÇÃO: Ordem de exibição
       dynamicOptions[`order_${m.name}`] = {
         section: sectionName,
         type: "number",
         label: `Ordem de Exibição (1, 2, 3...)`,
         default: index + 1,
-        order: 1 // Força a aparecer no topo da seção
+        order: 1 
       };
       
       dynamicOptions[`custom_label_${m.name}`] = {
@@ -230,27 +228,19 @@ looker.plugins.visualizations.add({
     const formatNum = (num) => num.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
     const getSign = (num) => num > 0 ? "+" : "";
 
-    // ORDENA AS MÉTRICAS COM BASE NO INPUT DO USUÁRIO
     let sortedMeasures = [...measures].sort((a, b) => {
       let orderA = config[`order_${a.name}`];
       let orderB = config[`order_${b.name}`];
       
-      // Se ainda não tiver configuração salva, usa a posição original (index + 1)
       if (orderA === undefined) orderA = measures.indexOf(a) + 1;
       if (orderB === undefined) orderB = measures.indexOf(b) + 1;
       
       return orderA - orderB;
     });
 
-    // Renderiza as métricas obedecendo a nova ordem (sortedMeasures ao invés de measures)
     sortedMeasures.forEach(m => {
       let val = row[m.name].value;
       let renderedVal = row[m.name].rendered || val;
-      
-      // REGRA NOVA: Verifica se na exibição ou no valor bruto tem "NaN". Se tiver, pula a criação deste card.
-      if (Number.isNaN(val) || String(val) === "NaN" || String(renderedVal).includes("NaN")) {
-        return; // Sai desta iteração do loop
-      }
       
       let customLabel = config[`custom_label_${m.name}`];
       let displayLabel = (customLabel && customLabel.trim() !== "") ? customLabel : (m.label_short || m.label);
@@ -259,9 +249,6 @@ looker.plugins.visualizations.add({
       let mainType = config[`main_display_${m.name}`] || "val";
       let subType = config[`sub_display_${m.name}`] || "none";
       
-      let mainHTML = "";
-      let subHTML = `<div class="metric-sub" style="visibility: hidden;">-</div>`; 
-      
       let diffAbs = 0, diffPct = 0, diffPp = 0;
       let color = "#333333";
       let hasComparison = (compareTo && compareTo !== "none" && row[compareTo]);
@@ -269,13 +256,8 @@ looker.plugins.visualizations.add({
       if (hasComparison) {
         let compVal = row[compareTo].value;
         
-        // 1. Inverte a subtração para o valor absoluto
         diffAbs = compVal - val;
-        
-        // 2. Inverte o divisor da porcentagem (para que o cálculo do % seja sobre a base correta)
         diffPct = val !== 0 ? ((diffAbs) / Math.abs(val)) * 100 : 0;
-        
-        // 3. Inverte a subtração dos pontos percentuais
         diffPp = (compVal - val) * 100;
 
         if (diffAbs > 0) color = config[`color_pos_${m.name}`];
@@ -293,30 +275,42 @@ looker.plugins.visualizations.add({
         if (type === "abs_pct") text = `${getSign(diffAbs)}${formatNum(diffAbs)} (${getSign(diffPct)}${formatNum(diffPct)}%)`;
         if (type === "abs_pp") text = `${getSign(diffAbs)}${formatNum(diffAbs)} (${getSign(diffPp)}${formatNum(diffPp)} p.p.)`;
 
-        // Se for o valor principal, ignora a cor e retorna apenas o texto cru
         if (isMain) {
           return text;
         }
         
-        // Se for a sub-métrica, aplica a tag HTML com a cor calculada
         return `<span style="color: ${color};">${text}</span>`;
       };
 
-      mainHTML = `<div class="metric-main">${getFormattedValue(mainType, true)}</div>`;
-
+      let mainDisplayText = getFormattedValue(mainType, true);
+      let subDisplayText = "";
+      let subHTML = `<div class="metric-sub" style="visibility: hidden;">-</div>`; 
+      
       if (subType !== "none" && hasComparison) {
-        subHTML = `<div class="metric-sub">${getFormattedValue(subType, false)}</div>`;
+        subDisplayText = getFormattedValue(subType, false);
+        subHTML = `<div class="metric-sub">${subDisplayText}</div>`;
       }
 
-      let card = document.createElement("div");
-      card.className = "metric-card";
-      card.innerHTML = `
+      let mainHTML = `<div class="metric-main">${mainDisplayText}</div>`;
+
+      // Monta o bloco HTML completo da coluna
+      let cardHTML = `
         <div class="metric-title-container">
           <div class="metric-title" title="${displayLabel}">${displayLabel}</div>
         </div>
         ${subHTML}
         ${mainHTML}
       `;
+
+      // A VALIDAÇÃO ABSOLUTA: Se a palavra "NaN" aparecer em qualquer parte do HTML deste cartão,
+      // a métrica é simplesmente ignorada e não é exibida.
+      if (cardHTML.includes("NaN")) {
+        return; 
+      }
+
+      let card = document.createElement("div");
+      card.className = "metric-card";
+      card.innerHTML = cardHTML;
       this.container.appendChild(card);
     });
 
@@ -334,7 +328,6 @@ looker.plugins.visualizations.add({
 
     let minSize = config.minFontSize || 10;
     
-    // Separação das variáveis de tamanho novamente
     let valSize = config.maxValueFontSize || 32;
     let titleSubSize = config.baseFontSize || 14;
     
@@ -384,7 +377,6 @@ looker.plugins.visualizations.add({
     while (isOverflowing()) {
       let reduced = false;
       
-      // Reduz de forma proporcional até o limite
       if (valSize > minSize) { valSize--; reduced = true; }
       if (titleSubSize > minSize) { titleSubSize--; reduced = true; }
 
